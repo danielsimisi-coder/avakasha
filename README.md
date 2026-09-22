@@ -61,6 +61,7 @@ The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
 | Type badge (image size, video length), path and "item N of M" for the selection | Loaded location highlighted in the sidebar | Delete does nothing in the map |
 | Command/Shift multi-selection | Select extra copies while keeping one | Undo and redo batches during this session |
 | Filter by name, type and size | Opt-in, local similar-image suggestions | Changed-file and path checks before each move |
+| Stop any scan, map or comparison with the red Stop button or Esc and keep what was found | | |
 | Right-click to reveal the original in Finder; drag rows out to Finder, WhatsApp or any window (copies) | Hidden, protected and bundle folders are labelled in the map | Progress, cancellation and per-file errors |
 | WhatsApp media filter: group chats, personal chats, status (by folder name only) | | |
 | Explicit resume of your last folder and position | Hard links are not treated as extra copies | No private file inventory in the app bundle |
@@ -81,6 +82,7 @@ The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
 | Key | Action |
 |---|---|
 | `Space` | Play or pause a video; otherwise toggle the preview (open by default) |
+| `Esc` | Stop a running scan, map or comparison and keep partial results |
 | `↑` / `↓` | Move through the list |
 | `⌘` + click | Add or remove a file from the selection |
 | `Shift` + click | Select a range |

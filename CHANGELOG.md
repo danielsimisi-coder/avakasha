@@ -2,6 +2,7 @@
 
 ## 0.1.0-beta.7
 
+- Stop a running scan, map or comparison: Refresh turns into a red Stop while work runs, Esc stops too, and the files found so far stay listed as partial results. Trash and restore operations still run to completion.
 - The selected file's path and the map's folder path are links: underline on hover, click shows the item in Finder.
 
 ## 0.1.0-beta.6

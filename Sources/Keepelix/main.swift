@@ -110,6 +110,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     var tips: NSTextField!
     var retryButton: NSButton!
     var mapButton: NSButton!
+    var rescanButton: NSButton!
+    var cancellable = false // true while a scan, map or analysis can be stopped with partial results
+    var escapeMonitor: Any?
     var scroll: NSScrollView!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -153,7 +156,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         for b in locationButtons { b.widthAnchor.constraint(equalTo:locationList.widthAnchor).isActive=true }
         choose.font = .systemFont(ofSize:11);choose.controlSize = .small
         let resume=button("Resume","המשך סקירה","clock.arrow.circlepath",#selector(resumeFolder))
-        let rescan=button("Refresh","רענן","arrow.clockwise",#selector(rescanFolder))
+        let rescan=button("Refresh","רענן","arrow.clockwise",#selector(rescanFolder));rescanButton=rescan
         headingLabel=label(L("Your files","הקבצים שלך"),23,.semibold)
         let heading=column([headingLabel],6)
         mapButton=button("Storage map","מפת אחסון","chart.pie",#selector(showStorageMap))
@@ -248,7 +251,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         retryButton=button("Retry restore","נסה לשחזר שוב","arrow.clockwise.circle",#selector(retryRestore));retryButton.isHidden=true
         retryButton.toolTip=L("Try again to restore items whose original location was taken. Nothing is overwritten.","נסה שוב לשחזר פריטים שהמיקום המקורי שלהם נתפס. שום קובץ לא נדרס.")
         let review=row([preview,next,spacer(),retryButton,undoButton,redoButton,trash])
-        cancelButton=NSButton(title:L("Cancel","בטל"),target:self,action:#selector(cancelWork));cancelButton.bezelStyle = .rounded;cancelButton.isEnabled=false
+        cancelButton=NSButton(title:L("Stop","עצור"),target:self,action:#selector(cancelWork));cancelButton.bezelStyle = .rounded;cancelButton.isEnabled=false
+        cancelButton.image=NSImage(systemSymbolName:"stop.fill",accessibilityDescription:nil);cancelButton.imagePosition = .imageLeading;cancelButton.setAccessibilityLabel(L("Stop and keep partial results","עצור ושמור תוצאות חלקיות"))
+        escapeMonitor=NSEvent.addLocalMonitorForEvents(matching:.keyDown){ [weak self] event in
+            guard let self=self, event.keyCode == 53, self.busy, self.cancellable, !(self.window.firstResponder is NSTextView) else { return event }
+            self.cancelWork();return nil // Esc stops a running scan, map or comparison
+        }
         spinner.style = .spinning;spinner.controlSize = .small;spinner.isDisplayedWhenStopped=false
         status.font = .systemFont(ofSize:11);status.textColor = .secondaryLabelColor;status.lineBreakMode = .byTruncatingTail
         let footer=row([spinner,status,spacer(),cancelButton],8)
@@ -457,8 +465,18 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         guard !busy else { return }
         if mapMode { if let target=mapRoot { startMap(target) } } else if let root=root { startScan(root) }
     }
-    @objc func cancelWork() { token.cancel();status.stringValue=L("Cancelling…","מבטל…") }
-    func setBusy(_ value: Bool) { busy=value;updateEnabled();if value{spinner.startAnimation(nil)}else{spinner.stopAnimation(nil)} }
+    @objc func cancelWork() { guard busy, cancellable else { return };token.cancel();status.stringValue=L("Stopping… keeping what was found","עוצר… שומר את מה שנמצא");cancelButton.isEnabled=false;rescanButton.isEnabled=false }
+    func setBusy(_ value: Bool, cancellable: Bool = true) {
+        busy=value;self.cancellable = value && cancellable;updateEnabled()
+        if value{spinner.startAnimation(nil)}else{spinner.stopAnimation(nil)}
+        // While something can be stopped, Refresh turns into a red Stop so the way out is obvious.
+        let stopping = value && cancellable
+        rescanButton?.title = stopping ? L("Stop","עצור") : L("Refresh","רענן")
+        rescanButton?.image = NSImage(systemSymbolName: stopping ? "stop.fill" : "arrow.clockwise",accessibilityDescription:nil)
+        rescanButton?.contentTintColor = stopping ? .systemRed : nil
+        rescanButton?.action = stopping ? #selector(cancelWork) : #selector(rescanFolder);rescanButton?.setAccessibilityLabel(rescanButton.title)
+        rescanButton?.toolTip = stopping ? L("Stop now and keep the files found so far (Esc)","עצור עכשיו ושמור את הקבצים שנמצאו עד כה (Esc)") : nil
+    }
     func updateEnabled() {
         buttons.forEach { b in
             let requiresSelection: Set<Selector> = [#selector(togglePreview),#selector(nextFile),#selector(trashSelection),#selector(deselect)]
@@ -468,11 +486,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             if let action=b.action, requiresFiles.contains(action) { b.isEnabled = !busy && !files.isEmpty }
             if b.action == #selector(showOlderFiles) { b.isEnabled = !busy && root != nil }
             if b.action == #selector(rescanFolder) { b.isEnabled = !busy && (mapMode ? mapRoot != nil : root != nil) }
+            if b.action == #selector(cancelWork) && b !== cancelButton { b.isEnabled = busy && cancellable && !token.isCancelled }
             if b.action == #selector(showStorageMap) { b.isEnabled = !busy && (mapMode ? root != nil : (root != nil || mapPanel.result != nil)) }
             if b.action == #selector(retryRestore) { b.isEnabled = !busy && !demoMode && !mapMode && history.blockedCount > 0 }
             if demoMode && (b.action == #selector(trashSelection) || b.action == #selector(undoTrash) || b.action == #selector(redoTrash)) { b.isEnabled=false }
             if b.action == #selector(resumeFolder) { b.isEnabled = !busy && preferences.string(forKey:"lastFolder") != nil }
-        }; cancelButton?.isEnabled=busy
+        }; cancelButton?.isEnabled = busy && cancellable && !token.isCancelled
         [sizeFilter,kindFilter,mode,groupPicker,agePicker,sortPicker,chatFilter].forEach{$0.isEnabled = !busy};search.isEnabled = !busy;chatNamesButton?.isEnabled = !busy
         undoButton?.isEnabled = !busy && !demoMode && !mapMode && history.canUndo
         redoButton?.isEnabled = !busy && !demoMode && !mapMode && history.canRedo
@@ -500,7 +519,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
                 let result=try Scanner.scan(root:selectedRoot,token:jobToken){count in DispatchQueue.main.async{self.status.stringValue=L("Scanning: ","נסרקו: ")+String(count)}}
                 DispatchQueue.main.async {
                     self.files=result.files;self.setBusy(false);self.applyFilters()
-                    self.status.stringValue="\(result.files.count) "+L("files","קבצים")+" · \(result.skipped) "+L("skipped","דולגו") + (result.cancelled ? " · "+L("Cancelled · partial results","בוטל · תוצאות חלקיות") : "")
+                    self.status.stringValue="\(result.files.count) "+L("files","קבצים")+" · \(result.skipped) "+L("skipped","דולגו") + (result.cancelled ? " · "+L("Stopped · partial results","נעצר · תוצאות חלקיות") : "")
                     if let last=self.preferences.string(forKey:"lastFile"),let i=self.shown.firstIndex(where:{$0.id==last}) {self.table.selectRowIndexes(IndexSet(integer:i),byExtendingSelection:false);self.table.scrollRowToVisible(i)}
                 }
             } catch {DispatchQueue.main.async{self.setBusy(false);self.show(L("Scan failed","הסריקה נכשלה"),error.localizedDescription)}}
@@ -580,7 +599,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         if r.notDownloaded>0 {parts.append("\(r.notDownloaded) "+L("not downloaded","לא הורדו"))}
         if r.otherVolumes>0 {parts.append("\(r.otherVolumes) "+L("other volumes skipped","כוננים אחרים דולגו"))}
         if result.sharedFiles>0 {parts.append("\(result.sharedFiles) "+L("hard links counted once","קישורים קשיחים נספרו פעם אחת"))}
-        if result.cancelled {parts.append(L("Cancelled · partial results","בוטל · תוצאות חלקיות"))}
+        if result.cancelled {parts.append(L("Stopped · partial results","נעצר · תוצאות חלקיות"))}
         return parts.joined(separator:" · ")
     }
     func reviewFromMap(_ url:URL) { guard !busy else{return};startScan(url) }
@@ -666,7 +685,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             a.addButton(withTitle:L("Show names","הצג שמות"));a.addButton(withTitle:L("Cancel","בטל"))
             guard a.runModal() == .alertFirstButtonReturn else { return }
         }
-        setBusy(true);cancelButton.isEnabled=false;status.stringValue=L("Reading chat list…","קורא רשימת שיחות…")
+        setBusy(true,cancellable:false);status.stringValue=L("Reading chat list…","קורא רשימת שיחות…")
         work.async {
             let result=Result{ try ChatDirectory.load(from:database) }
             DispatchQueue.main.async {
@@ -890,7 +909,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             guard alert.runModal() == .alertFirstButtonReturn else{return}
             if alert.suppressionButton?.state == .on {preferences.set(true,forKey:"skipTrashConfirmation");confirmationMenuItem?.state = .off}
         }
-        let keepers=guards;let row=table.selectedRow;setBusy(true);cancelButton.isEnabled=false;primary.previewItem=nil;comparison.previewItem=nil;stopVideo()
+        let keepers=guards;let row=table.selectedRow;setBusy(true,cancellable:false);primary.previewItem=nil;comparison.previewItem=nil;stopVideo()
         work.async {
             let result=self.history.move(chosen,root:root,keepers:keepers,backend:self.trashBackend)
             DispatchQueue.main.async {self.finishMove(result,nextRow:row)}
@@ -905,14 +924,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         window.makeFirstResponder(table)
     }
     @objc func undoTrash(){
-        guard !busy,!demoMode,!mapMode,history.canUndo else{return};setBusy(true);cancelButton.isEnabled=false
+        guard !busy,!demoMode,!mapMode,history.canUndo else{return};setBusy(true,cancellable:false)
         work.async {
             let result=self.history.undo(backend:self.trashBackend)
             DispatchQueue.main.async {self.finishRestore(result)}
         }
     }
     @objc func retryRestore(){
-        guard !busy,!demoMode,!mapMode,history.blockedCount>0 else{return};setBusy(true);cancelButton.isEnabled=false
+        guard !busy,!demoMode,!mapMode,history.blockedCount>0 else{return};setBusy(true,cancellable:false)
         work.async {
             let result=self.history.retryBlocked(backend:self.trashBackend)
             DispatchQueue.main.async {self.finishRestore(result)}
@@ -937,7 +956,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         window.makeFirstResponder(table)
     }
     @objc func redoTrash(){
-        guard !busy,!demoMode,!mapMode,history.canRedo else{return};let row=table.selectedRow;setBusy(true);cancelButton.isEnabled=false
+        guard !busy,!demoMode,!mapMode,history.canRedo else{return};let row=table.selectedRow;setBusy(true,cancellable:false)
         work.async {
             let result=self.history.redo(backend:self.trashBackend)
             DispatchQueue.main.async {if let result=result {self.finishMove(result,nextRow:row)}else{self.setBusy(false)}}
@@ -1062,6 +1081,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(!mapMode && root?.path == bigPath && files.count == 1 && files[0].name == "large.bin" && !scroll.isHidden && mapPanel.isHidden,"Review files here hands the folder to file review")
             showStorageMap();precondition(mapMode && mapPanel.current?.name == "Big" && mapPanel.result != nil,"Return to the map without re-mapping")
             showStorageMap();precondition(!mapMode && root?.path == bigPath,"Back to files")
+            // Stop: a big synthetic tree is scanned, Esc stops it, partial results stay and Refresh comes back.
+            let bigTree=temp.appendingPathComponent("many",isDirectory:true)
+            for i in 0..<40 { let d=bigTree.appendingPathComponent("d\(i)");try FileManager.default.createDirectory(at:d,withIntermediateDirectories:true);for j in 0..<60 { try Data("x".utf8).write(to:d.appendingPathComponent("f\(j).txt")) } }
+            startScan(bigTree);precondition(busy && cancellable && rescanButton.title == L("Stop","עצור") && rescanButton.action == #selector(cancelWork))
+            precondition(escapeMonitor != nil,"Esc is wired to Stop");cancelWork();precondition(token.isCancelled && !cancelButton.isEnabled);settle()
+            precondition(!busy && rescanButton.title == L("Refresh","רענן") && rescanButton.action == #selector(rescanFolder) && files.count <= 2400,"Stopping keeps partial results and restores Refresh: \(status.stringValue)")
+            try FileManager.default.removeItem(at:bigTree)
             startScan(reviewRoot);settle();precondition(!mapMode && root?.path == reviewRoot.resolvingSymlinksInPath().path)
             precondition(!history.canUndo && !history.canRedo)
             let alert=makeTrashAlert([files[0]]);precondition(alert.showsSuppressionButton && alert.suppressionButton?.state == .off)
@@ -1119,7 +1145,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     func windowShouldClose(_ sender:NSWindow)->Bool { applicationShouldTerminate(NSApplication.shared) == .terminateNow }
     func applicationShouldTerminate(_ sender:NSApplication)->NSApplication.TerminateReply{
-        if busy && !(token.isCancelled && cancelButton.isEnabled){show(L("Operation in progress","פעולה עדיין מתבצעת"),L("Cancel the scan and wait, or let the Trash operation finish before quitting.","בטל את הסריקה והמתן, או אפשר להעברה לפח להסתיים לפני הסגירה."));return .terminateCancel}
+        if busy && !(token.isCancelled && cancellable){show(L("Operation in progress","פעולה עדיין מתבצעת"),L("Cancel the scan and wait, or let the Trash operation finish before quitting.","בטל את הסריקה והמתן, או אפשר להעברה לפח להסתיים לפני הסגירה."));return .terminateCancel}
         let waiting=waitingRestores
         if waiting>0 && !smokeMode {
             let a=NSAlert();a.alertStyle = .warning;a.messageText=L("Quit with restores waiting?","לצאת כשיש שחזורים ממתינים?")
