@@ -125,7 +125,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     /// The home screen: disks, this session, where to start. Shown at launch until something is scanned or mapped.
     var overviewMode = false
     let overviewPanel = OverviewPanel()
-    var sidebarOverview: NSButton!, sidebarMap: NSButton!, sidebarOlder: NSButton!, sidebarInstallers: NSButton!
+    var sidebarOverview: NSButton!, sidebarMap: NSButton!, sidebarOlder: NSButton!, sidebarInstallers: NSButton!, sidebarFreeUp: NSButton!
+    /// "Free up space": known caches and app data explained one by one, measured on request.
+    var freeUpMode = false
+    let freeUpPanel = FreeUpPanel()
+    var home: URL { FileManager.default.homeDirectoryForCurrentUser }
     var previewHostView: NSView!
     let mapPanel = StorageMapPanel()
     var mapRoot: URL?
@@ -178,9 +182,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let installersButton=button("Installers","קבצי התקנה","shippingbox",#selector(showInstallers));installersButton.isBordered=false;installersButton.alignment = .left;installersButton.font = .systemFont(ofSize:14,weight:.medium);sidebarInstallers=installersButton
         installersButton.toolTip=L("Disk images, installer packages and archives in this location that have not changed for a while. Nothing is deleted.","תמונות דיסק, חבילות התקנה וארכיונים במיקום הזה שלא השתנו זמן רב. שום דבר לא נמחק.")
         let openBin=button("Trash","פח האשפה","trash",#selector(openTrash));openBin.isBordered=false;openBin.alignment = .left;openBin.font = .systemFont(ofSize:14,weight:.medium)
+        let freeUpEntry=button("Free up space","פינוי מקום","sparkles",#selector(showFreeUp));freeUpEntry.isBordered=false;freeUpEntry.alignment = .natural;freeUpEntry.font = .systemFont(ofSize:14,weight:.medium);sidebarFreeUp=freeUpEntry
+        freeUpEntry.toolTip=L("Caches and app data that fill System Data, explained one by one. Measured only when you ask.","מטמונים ונתוני אפליקציות שממלאים את System Data, מוסברים אחד־אחד. נמדדים רק כשתבקש.")
         let mapEntry=button("Storage map…","מפת אחסון…","chart.pie.fill",#selector(chooseMapFolder));mapEntry.isBordered=false;mapEntry.alignment = .left;mapEntry.font = .systemFont(ofSize:14,weight:.medium);sidebarMap=mapEntry
         mapEntry.toolTip=L("See which folders fill a folder or drive. Nothing is deleted.","ראה אילו תיקיות ממלאות תיקייה או כונן. שום דבר לא נמחק.")
-        let sidebarContent=column([brand,overviewEntry,label(L("LOCATIONS","מיקומים"),10,.semibold,true),locationList,choose,divider(),mapEntry,olderButton,installersButton,openBin,sidebarSpacer,privacy],18)
+        let sidebarContent=column([brand,overviewEntry,label(L("LOCATIONS","מיקומים"),10,.semibold,true),locationList,choose,divider(),mapEntry,freeUpEntry,olderButton,installersButton,openBin,sidebarSpacer,privacy],18)
         let sidebar=NSVisualEffectView();sidebar.material = .sidebar;sidebar.blendingMode = .behindWindow;sidebar.state = .followsWindowActiveState
         sidebar.addSubview(sidebarContent);sidebarContent.translatesAutoresizingMaskIntoConstraints=false
         NSLayoutConstraint.activate([sidebar.widthAnchor.constraint(equalToConstant:216),sidebarContent.leadingAnchor.constraint(equalTo:sidebar.leadingAnchor,constant:20),sidebarContent.trailingAnchor.constraint(equalTo:sidebar.trailingAnchor,constant:-16),sidebarContent.topAnchor.constraint(equalTo:sidebar.topAnchor,constant:24),sidebarContent.bottomAnchor.constraint(equalTo:sidebar.bottomAnchor,constant:-24),locationList.widthAnchor.constraint(equalTo:sidebarContent.widthAnchor)])
@@ -271,6 +277,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         overviewPanel.onMapDrive={[weak self] in self?.chooseMapFolder()}
         overviewPanel.onOpenTrash={[weak self] in self?.openTrash()}
         previewHostView=previewHost
+        mapPanel.onTrashFolder={[weak self] node in self?.trashFolderFromMap(node)}
+        freeUpPanel.translatesAutoresizingMaskIntoConstraints=false;listHost.addSubview(freeUpPanel,positioned:.below,relativeTo:emptyList);freeUpPanel.isHidden=true
+        NSLayoutConstraint.activate([freeUpPanel.leadingAnchor.constraint(equalTo:listHost.leadingAnchor,constant:12),freeUpPanel.trailingAnchor.constraint(equalTo:listHost.trailingAnchor,constant:-12),freeUpPanel.topAnchor.constraint(equalTo:listHost.topAnchor,constant:12),freeUpPanel.bottomAnchor.constraint(equalTo:listHost.bottomAnchor)])
+        previewHost.addSubview(freeUpPanel.detail);freeUpPanel.detail.translatesAutoresizingMaskIntoConstraints=false;freeUpPanel.detail.isHidden=true
+        NSLayoutConstraint.activate([freeUpPanel.detail.leadingAnchor.constraint(equalTo:previewHost.leadingAnchor,constant:22),freeUpPanel.detail.trailingAnchor.constraint(equalTo:previewHost.trailingAnchor,constant:-22),freeUpPanel.detail.topAnchor.constraint(equalTo:previewHost.topAnchor,constant:26)])
+        freeUpPanel.onMeasure={[weak self] locations in self?.measureLocations(locations)}
+        freeUpPanel.onTrash={[weak self] location,measurement in self?.trashLocation(location,measured:measurement)}
+        freeUpPanel.onReveal={[weak self] url in self?.revealFolder(url)}
+        freeUpPanel.onCopyCommand={[weak self] command in NSPasteboard.general.clearContents();NSPasteboard.general.setString(command,forType:.string);self?.status.stringValue=L("Command copied · paste it in Terminal","הפקודה הועתקה · הדבק ב־Terminal")}
+        freeUpPanel.onSelectionChange={[weak self] in self?.updateEnabled()}
         previewHost.addSubview(mapPanel.detail);mapPanel.detail.translatesAutoresizingMaskIntoConstraints=false;mapPanel.detail.isHidden=true
         NSLayoutConstraint.activate([mapPanel.detail.leadingAnchor.constraint(equalTo:previewHost.leadingAnchor,constant:22),mapPanel.detail.trailingAnchor.constraint(equalTo:previewHost.trailingAnchor,constant:-22),mapPanel.detail.topAnchor.constraint(equalTo:previewHost.topAnchor,constant:26)])
         let split=NSSplitView();split.isVertical=true;split.dividerStyle = .thin;split.addArrangedSubview(listHost);split.addArrangedSubview(previewHost)
@@ -448,11 +464,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     func validateMenuItem(_ item:NSMenuItem)->Bool {
         if item.action == #selector(undoCommand) {
             if let editor=window.firstResponder as? NSTextView {return editor.undoManager?.canUndo ?? false}
-            return !busy && !demoMode && !mapMode && history.canUndo
+            return !busy && !demoMode && !overviewMode && activeHistory.canUndo
         }
         if item.action == #selector(redoCommand) {
             if let editor=window.firstResponder as? NSTextView {return editor.undoManager?.canRedo ?? false}
-            return !busy && !demoMode && !mapMode && history.canRedo
+            return !busy && !demoMode && !overviewMode && activeHistory.canRedo
         }
         return true
     }
@@ -488,7 +504,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     /// The sidebar highlights the view you are in: a location while its files are shown, the map, the overview or a review filter.
     func updateLocationHighlight() {
-        let active = (!mapMode && !overviewMode) ? root?.path : nil
+        let active = (!mapMode && !overviewMode && !freeUpMode) ? root?.path : nil
         func highlight(_ b: NSButton?, _ on: Bool, _ value: String) {
             guard let b=b else { return }
             b.wantsLayer=true;b.layer?.cornerRadius=7
@@ -500,18 +516,106 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             let matches = active != nil && reviewSource == .scan && locationURL(b.tag).flatMap{ try? FileSafety.root($0) }?.path == active
             highlight(b, matches, L("Current location","המיקום הנוכחי"))
         }
-        let reviewing = !mapMode && !overviewMode && root != nil
+        let reviewing = !mapMode && !overviewMode && !freeUpMode && root != nil
         highlight(sidebarOverview, overviewMode, L("Current view","התצוגה הנוכחית"))
         highlight(sidebarMap, mapMode, L("Current view","התצוגה הנוכחית"))
+        highlight(sidebarFreeUp, freeUpMode, L("Current view","התצוגה הנוכחית"))
         highlight(sidebarOlder, reviewing && mode.indexOfSelectedItem == 3, L("Current view","התצוגה הנוכחית"))
         highlight(sidebarInstallers, reviewing && mode.indexOfSelectedItem == 4, L("Current view","התצוגה הנוכחית"))
     }
     @objc func showOverview() { guard !busy else { return };setOverview(true) }
+    @objc func showFreeUp() { guard !busy else { return };setFreeUp(true) }
+    func setFreeUp(_ on:Bool) {
+        freeUpMode=on
+        if on {
+            if overviewMode { setOverview(false) };if mapMode { mapMode=false }
+            reviewOnlyViews.forEach{$0.isHidden=true};scroll.isHidden=true;mapPanel.isHidden=true;mapPanel.detail.isHidden=true;overviewPanel.isHidden=true;emptyList.isHidden=true
+            previewHostView.isHidden=false;previewPlaceholder.isHidden=true;primary.isHidden=true;comparison.isHidden=true;primary.previewItem=nil;comparison.previewItem=nil;stopVideo()
+            freeUpPanel.home=home;freeUpPanel.reload(keepMeasurements:true);freeUpPanel.isHidden=false;freeUpPanel.detail.isHidden=false
+            headingLabel.stringValue=L("Free up space","פינוי מקום");folderLabel.stringValue=L("Known caches and app data in your home folder · measured only when you ask","מטמונים ונתוני אפליקציות מוכרים בתיקיית הבית · נמדדים רק כשתבקש")
+            tips.stringValue=L("Measure all · sizes     Move to Trash… · only for data the app rebuilds     ⌘Z · Undo","מדוד הכול · גדלים     העבר לפח… · רק לנתונים שהאפליקציה בונה מחדש     ⌘Z · שחזור")
+            status.stringValue = freeUpPanel.rows.isEmpty ? L("Nothing from the known list exists in this home folder.","לא נמצא כאן דבר מהרשימה המוכרת.") : "\(freeUpPanel.rows.count) "+L("known locations · press Measure all","מיקומים מוכרים · לחץ מדוד הכול")
+            updateEnabled();updateLocationHighlight();updateSpaceLabel();window.makeFirstResponder(freeUpPanel.table)
+        } else {
+            freeUpPanel.isHidden=true;freeUpPanel.detail.isHidden=true;previewHostView.isHidden=false
+        }
+    }
+    /// Measures known locations one by one on the work queue; cancel keeps what was measured so far.
+    func measureLocations(_ locations:[KnownLocation]) {
+        guard !busy, !locations.isEmpty else { return }
+        token=CancellationToken();let jobToken=token;let base=home;setBusy(true)
+        work.async {
+            var done=0
+            for location in locations {
+                if jobToken.isCancelled { break }
+                DispatchQueue.main.async { self.status.stringValue=L("Measuring ","מודד ")+LocationTexts.text(for:location).title+"…" }
+                let measurement=KnownLocations.measure(location,home:base,token:jobToken)
+                if measurement.cancelled { break };done += 1
+                DispatchQueue.main.async { self.freeUpPanel.apply(measurement) }
+            }
+            let finished=done
+            DispatchQueue.main.async {
+                self.setBusy(false)
+                let stopped = jobToken.isCancelled ? " · "+L("Stopped · partial","נעצר · חלקי") : ""
+                self.status.stringValue="\(finished) "+L("measured","נמדדו")+" · "+bytes(self.freeUpPanel.measuredTotal)+" · "+L("of which ","מתוכם ")+bytes(self.freeUpPanel.rebuildableTotal)+" "+L("is data the owning apps rebuild","נתונים שהאפליקציות בונות מחדש")+stopped
+                self.updateEnabled()
+            }
+        }
+    }
+    /// Whole-folder move for a known, rebuildable location: same guarded flow as the map, with the home folder as the safety root.
+    func trashLocation(_ location:KnownLocation,measured:LocationMeasurement,confirmed:Bool=false) {
+        guard !busy, location.safety == .rebuildable, let base=try? FileSafety.root(home) else { return }
+        let text=LocationTexts.text(for:location)
+        trashFolder(location.url(home:base),root:base,title:text.title,explanation:text.what+"\n"+L("Next time: ","בפעם הבאה: ")+text.next,confirmed:confirmed) { [weak self] in
+            self?.freeUpPanel.markMoved(location)
+        }
+    }
+    /// Whole-folder move from the storage map.
+    func trashFolderFromMap(_ node:StorageNode,confirmed:Bool=false) {
+        guard !busy, let target=mapRoot else { return }
+        trashFolder(node.url,root:target,title:node.name,explanation:nil,confirmed:confirmed) { [weak self] in
+            guard let self=self else { return }
+            self.mapPanel.remove(node);self.mapStale=true;self.mapPanel.setStale(true)
+            let prefix=node.url.path+"/";self.files.removeAll{ $0.id.hasPrefix(prefix) };if !self.mapMode { self.applyFilters() }
+        }
+    }
+    /// The one path every whole-folder move takes: check, measure again, confirm with fresh numbers, move with identity checks, record for Undo.
+    func trashFolder(_ folder:URL,root:URL,title:String,explanation:String?,confirmed:Bool,onMoved:@escaping ()->Void) {
+        guard !busy,!demoMode else { return }
+        let expected:FolderIdentity
+        do { expected=try FolderTrash.check(folder,root:root) } catch { show(L("This folder cannot be moved as a whole","לא ניתן להעביר את התיקייה הזו בשלמותה"),error.localizedDescription);return }
+        token=CancellationToken();let jobToken=token;setBusy(true);status.stringValue=L("Measuring ","מודד ")+title+"…"
+        work.async {
+            let fresh=try? StorageMapper.map(root:folder,token:jobToken,limit:0)
+            DispatchQueue.main.async {
+                self.setBusy(false)
+                guard let fresh=fresh, !fresh.cancelled else { self.status.stringValue=L("Stopped · nothing moved","נעצר · שום דבר לא הועבר");return }
+                if fresh.root.hasCaveats { self.show(L("Not moved","לא הועבר"),L("The folder holds items that could not be measured (not accessible, not downloaded, or on another volume). Review its files instead.","התיקייה מכילה פריטים שלא ניתן היה למדוד (לא נגישים, לא הורדו, או בכונן אחר). סקור את הקבצים שלה במקום.")); return }
+                if !confirmed && !self.smokeMode {
+                    let a=NSAlert();a.alertStyle = .critical;a.messageText=L("Move the folder “","להעביר את התיקייה ״")+title+L("” to Trash?","״ לפח?")
+                    var lines=[bytes(fresh.root.bytes)+" · \(fresh.root.files) "+L("files","קבצים")+" · \(fresh.root.directories) "+L("folders","תיקיות"),(folder.path as NSString).abbreviatingWithTildeInPath]
+                    if let explanation=explanation { lines.append(explanation) }
+                    lines.append(L("Everything inside goes to Trash as one item. Undo with ⌘Z in this session; Redo is not available for folders.","כל מה שבפנים עובר לפח כפריט אחד. שחזור עם ⌘Z בהפעלה זו; Redo לא זמין לתיקיות."))
+                    a.informativeText=lines.joined(separator:"\n");a.addButton(withTitle:L("Move to Trash","העבר לפח"));a.addButton(withTitle:L("Cancel","בטל"))
+                    guard a.runModal() == .alertFirstButtonReturn else { self.status.stringValue=L("Nothing moved","שום דבר לא הועבר");return }
+                }
+                let acting=self.historyFor(root);self.setBusy(true,cancellable:false)
+                self.work.async {
+                    let result=acting.moveFolder(folder,root:root,expected:expected,bytes:fresh.root.bytes,backend:self.trashBackend)
+                    DispatchQueue.main.async {
+                        self.setBusy(false)
+                        if result.ticket != nil { onMoved();self.status.stringValue=title+" · "+L("moved to Trash","הועבר לפח")+" · "+bytes(fresh.root.bytes);self.updateSpaceLabel();self.updateEnabled() }
+                        else if let failure=result.failure { self.show(L("Not moved","לא הועבר"),failure.message) }
+                    }
+                }
+            }
+        }
+    }
     func setOverview(_ on:Bool) {
         guard on != overviewMode || on else { return }
         overviewMode=on
         if on {
-            if mapMode { mapMode=false }
+            if mapMode { mapMode=false };if freeUpMode { setFreeUp(false) }
             reviewOnlyViews.forEach{$0.isHidden=true};scroll.isHidden=true;mapPanel.isHidden=true;mapPanel.detail.isHidden=true
             overviewPanel.isHidden=false;previewHostView.isHidden=true;emptyList.isHidden=true
             headingLabel.stringValue=L("Overview","סקירה כללית");folderLabel.stringValue=L("Disks, this session and where to start","כוננים, ההפעלה הזו ומאיפה להתחיל")
@@ -573,14 +677,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             if b.action == #selector(cancelWork) && b !== cancelButton { b.isEnabled = busy && cancellable && !token.isCancelled }
             if b.action == #selector(showStorageMap) { b.isEnabled = !busy && (overviewMode ? true : (mapMode ? root != nil : (root != nil || mapPanel.result != nil)));b.isHidden = overviewMode && mapPanel.result == nil }
             if b.action == #selector(showOverview) { b.isEnabled = !busy }
-            if b.action == #selector(retryRestore) { b.isEnabled = !busy && !demoMode && !mapMode && history.blockedCount > 0 }
+            if b.action == #selector(retryRestore) { b.isEnabled = !busy && !demoMode && !overviewMode && activeHistory.blockedCount > 0 }
+            if b.action == #selector(showFreeUp) { b.isEnabled = !busy }
             if demoMode && (b.action == #selector(trashSelection) || b.action == #selector(undoTrash) || b.action == #selector(redoTrash)) { b.isEnabled=false }
             if b.action == #selector(resumeFolder) { b.isEnabled = !busy && preferences.string(forKey:"lastFolder") != nil }
         }; cancelButton?.isEnabled = busy && cancellable && !token.isCancelled
         [sizeFilter,kindFilter,mode,groupPicker,agePicker,sortPicker,chatFilter].forEach{$0.isEnabled = !busy};search.isEnabled = !busy;chatNamesButton?.isEnabled = !busy
-        undoButton?.isEnabled = !busy && !demoMode && !mapMode && history.canUndo
-        redoButton?.isEnabled = !busy && !demoMode && !mapMode && history.canRedo
-        if !busy { retryButton?.isHidden = history.blockedCount == 0 } // history is only touched by the work queue while busy
+        undoButton?.isEnabled = !busy && !demoMode && !overviewMode && activeHistory.canUndo
+        redoButton?.isEnabled = !busy && !demoMode && !overviewMode && activeHistory.canRedo
+        if !busy { retryButton?.isHidden = activeHistory.blockedCount == 0 } // history is only touched by the work queue while busy
+        freeUpPanel.setEnabled(!busy)
         mapPanel.setEnabled(!busy)
         extrasButton?.isEnabled = !busy && mode.indexOfSelectedItem == 1 && !exact.isEmpty
         extrasButton?.isHidden = mode.indexOfSelectedItem != 1
@@ -591,6 +697,17 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         root=selectedRoot;updateSpaceLabel()
     }
     /// Bytes this session moved to Trash across every folder history, each history counted once.
+    /// The history the current view acts on: the map's root while the map is shown, the home folder in Free up space, otherwise the reviewed root.
+    var activeHistory: TrashHistory {
+        if freeUpMode, let h=try? FileSafety.root(home) { return historyFor(h) }
+        if mapMode, let target=mapRoot { return historyFor(target) }
+        return history
+    }
+    func historyFor(_ target:URL) -> TrashHistory {
+        if let current=root, current.path == target.path { return history }
+        if let existing=folderHistories[target.path] { return existing }
+        let fresh=TrashHistory();folderHistories[target.path]=fresh;return fresh
+    }
     var totalMovedBytes:Int64 {
         var seen=Set<ObjectIdentifier>();var total:Int64=0
         for h in [history]+Array(folderHistories.values) where seen.insert(ObjectIdentifier(h)).inserted {total+=h.sessionMovedBytes}
@@ -607,7 +724,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     func startScan(_ url: URL) {
         guard !busy else{return}
         do { activateRoot(try FileSafety.root(url)) } catch { show(L("Cannot scan this folder","לא ניתן לסרוק את התיקייה"),error.localizedDescription);return }
-        reviewSource = .scan;if overviewMode { setOverview(false) };if mapMode { setMapMode(false) }
+        reviewSource = .scan;if overviewMode { setOverview(false) };if freeUpMode { setFreeUp(false) };if mapMode { setMapMode(false) }
         let selectedRoot=root!;preferences.set(selectedRoot.path,forKey:"lastFolder");folderLabel.stringValue=selectedRoot.path;updateLocationHighlight()
         if chatNamesSource != ChatDirectory.databaseURL(near:selectedRoot) { chatNames=[:];chatNamesSource=nil }
         chatFilter.removeAllItems()
@@ -626,7 +743,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     // MARK: Storage map
     func setMapMode(_ on:Bool) {
-        if overviewMode { setOverview(false) }
+        if overviewMode { setOverview(false) };if freeUpMode { setFreeUp(false) }
         mapMode=on
         reviewOnlyViews.forEach{$0.isHidden=on}
         scroll.isHidden=on;mapPanel.isHidden = !on;mapPanel.detail.isHidden = !on
@@ -1121,22 +1238,29 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         window.makeFirstResponder(table)
     }
     @objc func undoTrash(){
-        guard !busy,!demoMode,!mapMode,history.canUndo else{return};setBusy(true,cancellable:false)
+        guard !busy,!demoMode,!overviewMode,activeHistory.canUndo else{return};let acting=activeHistory;setBusy(true,cancellable:false)
         work.async {
-            let result=self.history.undo(backend:self.trashBackend)
+            let result=acting.undo(backend:self.trashBackend)
             DispatchQueue.main.async {self.finishRestore(result)}
         }
     }
     @objc func retryRestore(){
-        guard !busy,!demoMode,!mapMode,history.blockedCount>0 else{return};setBusy(true,cancellable:false)
+        guard !busy,!demoMode,!overviewMode,activeHistory.blockedCount>0 else{return};let acting=activeHistory;setBusy(true,cancellable:false)
         work.async {
-            let result=self.history.retryBlocked(backend:self.trashBackend)
+            let result=acting.retryBlocked(backend:self.trashBackend)
             DispatchQueue.main.async {self.finishRestore(result)}
         }
     }
     func finishRestore(_ result:RestoreResult?) {
         setBusy(false);guard let result=result else{return}
-        if !result.restored.isEmpty { markMapStale() }
+        if !result.restored.isEmpty { markMapStale();if freeUpMode { freeUpPanel.reload(keepMeasurements:true);result.restored.forEach{ freeUpPanel.restored($0) } } }
+        if mapMode || freeUpMode {
+            var text="\(result.restored.count) " + L("restored","שוחזרו")
+            if activeHistory.blockedCount>0 {text += " · \(activeHistory.blockedCount) " + L("waiting in Trash · Retry restore","ממתינים בפח · נסה לשחזר שוב")}
+            status.stringValue=text;updateSpaceLabel();updateEnabled()
+            if !result.failures.isEmpty { show(L("Some items could not be restored","חלק מהפריטים לא שוחזרו"),result.failures.map{$0.url.lastPathComponent+": "+$0.message}.joined(separator:"\n")) }
+            return
+        }
         if let root=root {
             for url in result.restored {
                 if let record=try? FileRecord(url:url),(try? FileSafety.validate(record,root:root)) != nil {
@@ -1154,7 +1278,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         window.makeFirstResponder(table)
     }
     @objc func redoTrash(){
-        guard !busy,!demoMode,!mapMode,history.canRedo else{return};let row=table.selectedRow;setBusy(true,cancellable:false)
+        guard !busy,!demoMode,!overviewMode,!mapMode,!freeUpMode,history.canRedo else{return};let row=table.selectedRow;setBusy(true,cancellable:false)
         work.async {
             let result=self.history.redo(backend:self.trashBackend)
             DispatchQueue.main.async {if let result=result {self.finishMove(result,nextRow:row)}else{self.setBusy(false)}}
@@ -1165,6 +1289,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         func cleanup() { try? FileManager.default.removeItem(at: temp); preferences.removePersistentDomain(forName:"Keepelix.SyntheticSmoke") }
         do {
             try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
+            struct FixtureTrash: TrashBackend {
+                let folder:URL
+                func moveToTrash(_ url:URL)throws->URL {
+                    try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
+                    let destination=folder.appendingPathComponent(UUID().uuidString)
+                    try FileManager.default.moveItem(at:url,to:destination);return destination
+                }
+                func restore(_ source:URL,to destination:URL)throws {try FileManager.default.moveItem(at:source,to:destination)}
+            }
+            trashBackend=FixtureTrash(folder:temp.appendingPathComponent(".fixture-trash"))
             for (name, text) in [("coast-notes.txt", "Synthetic duplicate fixture"), ("coast-notes-copy.txt", "Synthetic duplicate fixture"), ("readme.txt", "Unrelated synthetic example")] {
                 try Data(text.utf8).write(to: temp.appendingPathComponent(name))
             }
@@ -1295,7 +1429,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(mapPanel.reviewTarget?.path == bigPath,"The loose-files row reviews the current folder")
             mapPanel.goUp();precondition(mapPanel.current?.name == "map" && mapPanel.selectedRow?.title == "Big")
             let mapDelete=NSEvent.keyEvent(with:.keyDown,location:.zero,modifierFlags:[],timestamp:0,windowNumber:window.windowNumber,context:nil,characters:"",charactersIgnoringModifiers:"",isARepeat:false,keyCode:51)!
-            mapPanel.table.keyDown(with:mapDelete);precondition(!busy && FileManager.default.fileExists(atPath:mapFolder.appendingPathComponent("Big/large.bin").path),"Delete in the map must not move anything")
+            mapPanel.table.selectRowIndexes(IndexSet(integer:mapPanel.rows.firstIndex{ !$0.isFolder }!),byExtendingSelection:false)
+            mapPanel.table.keyDown(with:mapDelete);precondition(!busy && FileManager.default.fileExists(atPath:mapFolder.appendingPathComponent("Big/large.bin").path),"Delete on the loose-files row moves nothing")
+            mapPanel.table.selectRowIndexes(IndexSet(integer:mapPanel.rows.firstIndex{ $0.title == "Big" }!),byExtendingSelection:false)
             selectAllFiles();precondition(table.selectedRowIndexes.isEmpty,"Select all must not reach the hidden file table in map mode")
             mapPanel.reviewSelected();settle()
             precondition(!mapMode && root?.path == bigPath && files.count == 1 && files[0].name == "large.bin" && !scroll.isHidden && mapPanel.isHidden,"Review files here hands the folder to file review")
@@ -1356,16 +1492,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(checkCell.action == #selector(reviewedClicked(_:)));reviewedClicked(checkCell);precondition(!reviewed.isReviewed(left),"Clicking the checkmark clears the mark")
             precondition(!history.canUndo && !history.canRedo)
             let alert=makeTrashAlert([files[0]]);precondition(alert.showsSuppressionButton && alert.suppressionButton?.state == .off)
-            struct FixtureTrash: TrashBackend {
-                let folder:URL
-                func moveToTrash(_ url:URL)throws->URL {
-                    try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true)
-                    let destination=folder.appendingPathComponent(UUID().uuidString)
-                    try FileManager.default.moveItem(at:url,to:destination);return destination
-                }
-                func restore(_ source:URL,to destination:URL)throws {try FileManager.default.moveItem(at:source,to:destination)}
-            }
-            trashBackend=FixtureTrash(folder:temp.appendingPathComponent(".fixture-trash"))
             preferences.set(true,forKey:"skipTrashConfirmation")
             sortPicker.selectItem(at:ReviewSort.name.rawValue);changeSort()
             let target=temp.appendingPathComponent("coast-notes.txt").resolvingSymlinksInPath()
@@ -1401,6 +1527,34 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(retryButton.isHidden,"Retry button must hide once nothing waits")
             precondition(restoredText == "Synthetic duplicate fixture","Restored content mismatch: \(restoredText)")
             precondition(history.canRedo,"A retried restore must be redoable")
+            // Whole-folder move from the map: measured again, moved as one item, undoable from the map, never for bundles or hidden folders.
+            startMap(mapFolder);settle();precondition(mapMode)
+            mapPanel.table.selectRowIndexes(IndexSet(integer:mapPanel.rows.firstIndex{$0.title == "Small"}!),byExtendingSelection:false)
+            precondition(mapPanel.trashableFolder?.name == "Small" && mapPanel.trashButton.isEnabled)
+            let smallURL=mapFolder.appendingPathComponent("Small");let mapBytesBefore=mapPanel.result!.root.bytes
+            trashFolderFromMap(mapPanel.trashableFolder!,confirmed:true);settle();settle()
+            precondition(!FileManager.default.fileExists(atPath:smallURL.path) && !mapPanel.rows.contains{$0.title == "Small"} && mapPanel.result!.root.bytes < mapBytesBefore && mapStale,"Folder moved and detached from the map")
+            precondition(activeHistory.canUndo && !activeHistory.canRedo && undoButton.isEnabled,"Folder moves are undoable from the map")
+            undoTrash();settle();precondition(FileManager.default.fileExists(atPath:smallURL.appendingPathComponent("tiny.txt").path) && !activeHistory.canRedo,"Undo brings the folder back; no redo for folders")
+            try FileManager.default.createDirectory(at:mapFolder.appendingPathComponent(".hiddencache"),withIntermediateDirectories:true);try Data("h".utf8).write(to:mapFolder.appendingPathComponent(".hiddencache/x"))
+            startMap(mapFolder);settle();mapPanel.table.selectRowIndexes(IndexSet(integer:mapPanel.rows.firstIndex{$0.title == ".hiddencache"}!),byExtendingSelection:false)
+            precondition(mapPanel.trashableFolder == nil && !mapPanel.trashButton.isEnabled,"Hidden folders cannot be moved whole")
+            // Free up space: a synthetic home with known locations, measured on request, moved with the same guarded flow, restored with Undo.
+            let fakeHome=temp.appendingPathComponent("home",isDirectory:true)
+            try FileManager.default.createDirectory(at:fakeHome.appendingPathComponent("Library/Developer/Xcode/DerivedData/Proj"),withIntermediateDirectories:true)
+            try Data(repeating:0x44,count:30_000).write(to:fakeHome.appendingPathComponent("Library/Developer/Xcode/DerivedData/Proj/index.bin"))
+            try FileManager.default.createDirectory(at:fakeHome.appendingPathComponent("Library/Caches/com.example.app"),withIntermediateDirectories:true)
+            try FileManager.default.createDirectory(at:fakeHome.appendingPathComponent("Library/Mail"),withIntermediateDirectories:true)
+            freeUpPanel.home=fakeHome;freeUpPanel.reload();precondition(Set(freeUpPanel.rows.map{$0.location.id}) == ["xcode.derivedData","mail","cache.com.example.app","system.caches"],"\(freeUpPanel.rows.map{$0.location.id})")
+            measureLocations(freeUpPanel.unmeasured);settle()
+            let derived=freeUpPanel.rows.first{$0.location.id == "xcode.derivedData"}!;precondition((derived.measurement?.bytes ?? 0) >= 30_000 && freeUpPanel.rows.first{$0.location.id == "mail"}!.measurement?.files == 0)
+            freeUpPanel.table.selectRowIndexes(IndexSet(integer:freeUpPanel.rows.firstIndex{$0.location.id == "mail"}!),byExtendingSelection:false);precondition(!freeUpPanel.trashButton.isEnabled,"Mail is never offered for Trash")
+            freeUpPanel.table.selectRowIndexes(IndexSet(integer:freeUpPanel.rows.firstIndex{$0.location.id == "xcode.derivedData"}!),byExtendingSelection:false);precondition(freeUpPanel.trashButton.isEnabled)
+            let derivedURL=fakeHome.appendingPathComponent("Library/Developer/Xcode/DerivedData")
+            let homeRoot=try FileSafety.root(fakeHome);trashFolder(derivedURL,root:homeRoot,title:"DerivedData",explanation:nil,confirmed:true){ self.freeUpPanel.markMoved(derived.location) };settle();settle()
+            precondition(!FileManager.default.fileExists(atPath:derivedURL.path) && freeUpPanel.rows.first{$0.location.id == "xcode.derivedData"}!.moved && historyFor(homeRoot).sessionMovedBytes >= 30_000,"Known location moved as one folder")
+            let restoredFolder=historyFor(homeRoot).undo(backend:trashBackend)!;precondition(restoredFolder.restored.map(\.path) == [derivedURL.path] && FileManager.default.fileExists(atPath:derivedURL.appendingPathComponent("Proj/index.bin").path))
+            try FileManager.default.removeItem(at:fakeHome);freeUpPanel.home=FileManager.default.homeDirectoryForCurrentUser
             let savedRoot=root!;activateRoot(temp.appendingPathComponent("other"));precondition(!history.canUndo && !history.canRedo);activateRoot(savedRoot);precondition(history.canRedo)
             toggleTrashConfirmation(confirmationMenuItem!);precondition(!preferences.bool(forKey:"skipTrashConfirmation"))
             let languageItems=languageMenuItem!.submenu!.items;precondition(languageItems.map{$0.representedObject as? String} == ["en","he"] && languageItems[0].state == .on)

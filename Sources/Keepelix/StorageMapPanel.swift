@@ -28,11 +28,12 @@ final class MapTable: NSTableView {
     var onOpen: (() -> Void)?
     var onUp: (() -> Void)?
     var onReveal: ((Int) -> Void)?
+    var onTrash: (() -> Void)?
     override func keyDown(with event: NSEvent) {
         let command = event.modifierFlags.contains(.command)
         if event.keyCode == 36 || event.keyCode == 76 || (command && event.keyCode == 125) { if !event.isARepeat { onOpen?() }; return }
         if command && event.keyCode == 126 { if !event.isARepeat { onUp?() }; return }
-        if event.keyCode == 51 || event.keyCode == 117 { NSSound.beep(); return } // The map never moves files; review them first.
+        if event.keyCode == 51 || event.keyCode == 117 { if !event.isARepeat { onTrash?() }; return } // whole-folder move, always confirmed
         super.keyDown(with: event)
     }
     override func menu(for event: NSEvent) -> NSMenu? {
@@ -58,6 +59,9 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
     /// Shown when files changed since the map was measured; the numbers on screen are then out of date.
     let rescanButton = NSButton()
     var onRescan: (() -> Void)?
+    /// Moves the selected folder to Trash through the controller's guarded flow (fresh measure, confirmation, identity check).
+    let trashButton = NSButton()
+    var onTrashFolder: ((StorageNode) -> Void)?
     let detail = NSStackView()
     private let detailTitle = NSTextField(wrappingLabelWithString: "")
     private let detailSize = NSTextField(labelWithString: "")
@@ -83,7 +87,8 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         for (button, en, he, symbol, action) in [(openButton, "Open folder", "פתח תיקייה", "arrow.down.right.square", #selector(openSelected)),
                                                   (reviewButton, "Review files here", "סקור קבצים כאן", "list.bullet.rectangle", #selector(reviewSelected)),
                                                   (largestButton, "Largest files", "הקבצים הגדולים ביותר", "list.number", #selector(largestTapped)),
-                                                  (rescanButton, "Rescan", "מדוד מחדש", "arrow.clockwise", #selector(rescanTapped))] {
+                                                  (rescanButton, "Rescan", "מדוד מחדש", "arrow.clockwise", #selector(rescanTapped)),
+                                                  (trashButton, "Move folder to Trash…", "העבר תיקייה לפח…", "trash", #selector(trashTapped))] {
             button.title = L(en, he); button.target = self; button.action = action; button.bezelStyle = .rounded
             button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil); button.imagePosition = .imageLeading
             button.font = .systemFont(ofSize: 13, weight: .medium); button.setAccessibilityLabel(L(en, he))
@@ -94,7 +99,10 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         let spacer = NSView(); spacer.setContentHuggingPriority(.init(1), for: .horizontal)
         rescanButton.isHidden = true; rescanButton.contentTintColor = .systemOrange
         rescanButton.toolTip = L("Files were moved or restored since this map was measured. Measure again to update the numbers.", "קבצים הועברו או שוחזרו מאז שהמפה נמדדה. מדוד מחדש כדי לעדכן את המספרים.")
-        let toolbar = NSStackView(views: [crumbs, spacer, rescanButton, openButton, reviewButton, largestButton]); toolbar.spacing = 8; toolbar.alignment = .centerY
+        trashButton.contentTintColor = .systemRed
+        trashButton.toolTip = L("Measures the folder again, shows what it holds and asks before moving the whole folder to Trash. Not for bundles, hidden folders or folders with unmeasured items.", "מודד את התיקייה מחדש, מציג מה יש בה ומבקש אישור לפני העברת התיקייה כולה לפח. לא לחבילות, לתיקיות מוסתרות או לתיקיות עם פריטים שלא נמדדו.")
+        let toolbar = NSStackView(views: [crumbs, spacer, rescanButton, openButton, reviewButton, largestButton, trashButton]); toolbar.spacing = 8; toolbar.alignment = .centerY
+        table.onTrash = { [weak self] in self?.trashTapped() }
         crumbs.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         table.rowHeight = 30; table.intercellSpacing = NSSize(width: 12, height: 4); table.usesAlternatingRowBackgroundColors = false; table.style = .inset
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle; table.allowsMultipleSelection = false
@@ -186,6 +194,18 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
     }
     @objc func reviewSelected() { if let url = reviewTarget { onReview?(url) } else { NSSound.beep() } }
     @objc private func rescanTapped() { onRescan?() }
+    /// A subfolder row that the guarded whole-folder move may consider: never the root, a bundle, a hidden or unreadable folder, or one with unmeasured items.
+    var trashableFolder: StorageNode? {
+        guard let node = selectedRow?.node, node.parent != nil, !node.isPackage, !node.isHidden, !node.isUnreadable, !node.hasCaveats else { return nil }
+        return node
+    }
+    @objc func trashTapped() { if let node = trashableFolder { onTrashFolder?(node) } else { NSSound.beep() } }
+    /// Drops a folder that went to Trash from the tree and redraws the current level.
+    func remove(_ node: StorageNode) {
+        guard let parent = node.parent, let current = current else { return }
+        parent.detach(node)
+        show(current.parent == nil && current === node ? parent : (current === node ? parent : current))
+    }
     @objc private func largestTapped() { if result != nil { onLargest?() } else { NSSound.beep() } }
     /// The largest mapped files inside `node`; only the files directly inside it for the loose-files row.
     func largestFiles(in node: StorageNode, directOnly: Bool, limit: Int = 5) -> [LargeFile] {
@@ -271,6 +291,7 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         openButton.isEnabled = selectedRow?.isOpenable == true
         reviewButton.isEnabled = reviewTarget != nil
         largestButton.isEnabled = result != nil
+        trashButton.isEnabled = trashableFolder != nil
     }
-    func setEnabled(_ enabled: Bool) { table.isEnabled = enabled; crumbs.isEnabled = enabled; if enabled { updateButtons() } else { openButton.isEnabled = false; reviewButton.isEnabled = false; largestButton.isEnabled = false } }
+    func setEnabled(_ enabled: Bool) { table.isEnabled = enabled; crumbs.isEnabled = enabled; trashButton.isEnabled = enabled && trashableFolder != nil; if enabled { updateButtons() } else { openButton.isEnabled = false; reviewButton.isEnabled = false; largestButton.isEnabled = false } }
 }

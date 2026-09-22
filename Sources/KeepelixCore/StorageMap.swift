@@ -45,6 +45,18 @@ public final class StorageNode {
         bytes += child.bytes; files += child.files; directories += child.directories + 1
         inaccessible += child.inaccessible; notDownloaded += child.notDownloaded; otherVolumes += child.otherVolumes
     }
+    /// Removes a moved child and subtracts its totals from every ancestor; used after a folder went to Trash.
+    public func detach(_ child: StorageNode) {
+        guard let index = children.firstIndex(where: { $0 === child }) else { return }
+        children.remove(at: index)
+        var node: StorageNode? = self
+        while let n = node {
+            n.bytes -= child.bytes; n.files -= child.files; n.directories -= child.directories + 1
+            n.inaccessible -= child.inaccessible; n.notDownloaded -= child.notDownloaded; n.otherVolumes -= child.otherVolumes
+            node = n.parent
+        }
+        child.parent = nil
+    }
     func sortRecursively() {
         children.sort { $0.bytes == $1.bytes ? $0.name.localizedStandardCompare($1.name) == .orderedAscending : $0.bytes > $1.bytes }
         children.forEach { $0.sortRecursively() }
