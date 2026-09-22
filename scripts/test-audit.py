@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 
 source = pathlib.Path(__file__).with_name('audit-source.py')
-with tempfile.TemporaryDirectory(prefix='keepelix-audit-test-') as folder:
+with tempfile.TemporaryDirectory(prefix='avakasha-audit-test-') as folder:
     root = pathlib.Path(folder)
     (root / 'scripts').mkdir()
     shutil.copyfile(source, root / 'scripts/audit-source.py')

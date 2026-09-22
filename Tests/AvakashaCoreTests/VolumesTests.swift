@@ -1,5 +1,5 @@
 import XCTest
-@testable import KeepelixCore
+@testable import AvakashaCore
 
 final class VolumesTests: XCTestCase {
     func testTemporaryDirectoryVolumeHasCapacity() throws {

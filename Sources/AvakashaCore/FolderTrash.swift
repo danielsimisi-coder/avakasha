@@ -1,9 +1,10 @@
 import Foundation
 import Darwin
 
-/// Identity of a directory for whole-folder moves: device and inode only. A folder's own modification time changes
-/// whenever a direct child is added or removed, including Finder's `.DS_Store`, so it cannot gate restores; the
-/// no-overwrite check on the destination protects the user instead.
+/// Identity of a directory for whole-folder moves. The move requires the full identity (device, inode and the folder's
+/// own modification time, which changes whenever a direct child is added or removed) to match what was just measured.
+/// Restores compare device and inode only: Finder may write `.DS_Store` inside a folder in Trash, and the no-overwrite
+/// check on the destination protects the user there.
 public struct FolderIdentity: Equatable {
     public let device: Int32
     public let inode: UInt64
@@ -33,27 +34,54 @@ public struct FolderRestoreResult { public let restored: Bool; public let failur
 /// the folder must sit strictly inside the chosen root, must not be the root, a symbolic link, a package, hidden,
 /// or a cloud placeholder, and its identity must match what was measured moments before the confirmation.
 public enum FolderTrash {
-    public static func check(_ folder: URL, root: URL) throws -> FolderIdentity {
+    /// Whole-folder moves are allowed only inside the user's own areas: below the home folder (never the home folder itself),
+    /// below the process temporary folder (tests and the demo), or below a mounted volume's root. System folders,
+    /// /Applications, /Library, other users and volume roots are refused whatever root was chosen.
+    static func isProtected(_ path: String, home: String, temporary: String? = nil) -> Bool {
+        if path == home || home.hasPrefix(path + "/") { return true }
+        if path.hasPrefix(home + "/") { return false }
+        if let temporary = temporary, path.hasPrefix(temporary.hasSuffix("/") ? temporary : temporary + "/") { return false }
+        if path.hasPrefix("/Volumes/") { return !path.dropFirst("/Volumes/".count).contains("/") } // a volume's own root is protected, its contents are not
+        return true
+    }
+    /// Verifies a folder may be moved as a whole and returns its identity for the move that follows.
+    /// `allowHiddenAncestors` is false for the map (nothing under a hidden folder is offered, matching file review)
+    /// and true only for the vetted catalogue, whose entries live under Library or dot folders by design.
+    public static func check(_ folder: URL, root: URL, allowHiddenAncestors: Bool = false) throws -> FolderIdentity {
         let rootPath = root.standardizedFileURL.resolvingSymlinksInPath().path
         let path = folder.standardizedFileURL
         guard path.path.hasPrefix(rootPath + "/"), path.path != rootPath, path.resolvingSymlinksInPath().path == path.path else { throw TriageError.unsafePath }
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.resolvingSymlinksInPath().path
+        let temporary = FileManager.default.temporaryDirectory.standardizedFileURL.resolvingSymlinksInPath().path
+        guard !isProtected(path.resolvingSymlinksInPath().path, home: home, temporary: temporary) else { throw TriageError.folderProtected }
         guard !path.lastPathComponent.hasPrefix(".") else { throw TriageError.folderProtected }
         if let values = try? path.resourceValues(forKeys: [.isPackageKey, .isHiddenKey]), values.isPackage == true || values.isHidden == true { throw TriageError.folderProtected }
-        return try FolderIdentity(url: path)
+        if !allowHiddenAncestors {
+            var ancestor = path.deletingLastPathComponent()
+            while ancestor.path.count > rootPath.count {
+                if ancestor.lastPathComponent.hasPrefix(".") { throw TriageError.folderProtected }
+                if let hidden = try? ancestor.resourceValues(forKeys: [.isHiddenKey]).isHidden, hidden { throw TriageError.folderProtected }
+                ancestor = ancestor.deletingLastPathComponent()
+            }
+        }
+        var rootStat = stat()
+        guard root.standardizedFileURL.withUnsafeFileSystemRepresentation({ lstat($0, &rootStat) }) == 0 else { throw TriageError.unsafePath }
+        let identity = try FolderIdentity(url: path)
+        guard identity.device == rootStat.st_dev else { throw TriageError.notLocal } // a mount point inside the root is never moved
+        return identity
     }
 
     /// Moves `folder` to Trash when it still is the folder that was measured (`expected`). Never follows links, never
     /// touches anything outside `root`, and verifies the moved item keeps its identity; otherwise it tries to put it back.
-    public static func move(_ folder: URL, root: URL, expected: FolderIdentity, backend: TrashBackend = SystemTrash()) -> FolderMoveResult {
+    public static func move(_ folder: URL, root: URL, expected: FolderIdentity, allowHiddenAncestors: Bool = false, backend: TrashBackend = SystemTrash()) -> FolderMoveResult {
         do {
-            let current = try check(folder, root: root)
+            let current = try check(folder, root: root, allowHiddenAncestors: allowHiddenAncestors)
             guard current == expected else { throw TriageError.changed }
             let destination = try backend.moveToTrash(folder.standardizedFileURL)
+            // Only the folder that was checked may be recorded for Undo. If what sits at the reported Trash location is not that
+            // folder, nothing is touched further (a rollback could move the wrong item) and the user is pointed at Finder Trash.
             guard let moved = try? FolderIdentity(url: destination), moved.sameFolder(as: current) else {
-                let rollback = restore(FolderTicket(original: folder.standardizedFileURL, trashed: destination, identity: (try? FolderIdentity(url: destination)) ?? current), root: root, backend: backend)
-                throw NSError(domain: "Keepelix", code: 7, userInfo: [NSLocalizedDescriptionKey: rollback.restored
-                    ? "The folder changed while it was moved. It was put back; measure it again."
-                    : "The folder was moved but could not be verified afterwards. Inspect it in Finder Trash; Undo may be unavailable."])
+                throw NSError(domain: "Avakasha", code: 7, userInfo: [NSLocalizedDescriptionKey: "The folder was moved but could not be verified afterwards. Inspect it in Finder Trash; Undo is unavailable for it."])
             }
             return FolderMoveResult(ticket: FolderTicket(original: folder.standardizedFileURL, trashed: destination, identity: moved), failure: nil)
         } catch { return FolderMoveResult(ticket: nil, failure: FileFailure(url: folder, message: error.localizedDescription)) }

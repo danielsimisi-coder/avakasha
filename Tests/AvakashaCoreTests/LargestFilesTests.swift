@@ -1,7 +1,7 @@
 import XCTest
 import Foundation
 import Darwin
-@testable import KeepelixCore
+@testable import AvakashaCore
 
 /// Synthetic folders only: every fixture lives under a fresh temporary directory that tearDown removes.
 final class LargestFilesTests: XCTestCase {

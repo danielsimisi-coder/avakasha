@@ -8,6 +8,11 @@
 - Installers & archives: a sidebar button and review mode listing disk images, installer packages and archives not modified within the chosen cutoff, by file extension only; the type badge names the family. Nothing is auto-selected.
 - Reviewed and kept: K, the check in the star column or Keep & next marks files you decided to keep (stored in this app's preferences by path with the file's size and modification time, so a rewritten file reappears). The star filter adds "Not yet reviewed" and "Reviewed only"; a move to Trash forgets the mark. A star still shows ahead of the check.
 - Session space summary in the bottom row: allocated bytes moved to Trash this session (less what Undo restored) next to the free space macOS reports for the volume, side by side, not as a prediction.
+- Overview at launch: used, total and free space for each local disk with a share bar, what this session moved to Trash, and buttons to map the home folder, map a folder or drive, or open Trash in Finder. Reads volume attributes only.
+- Whole-folder moves from the storage map: Delete or the red "Move folder to Trash…" button moves the selected subfolder to Trash as one item after a check (inside the mapped root, not the root, a link, a bundle, hidden or a cloud placeholder), a fresh measurement, a refusal when anything in it could not be measured, and a confirmation that is always shown. The folder is moved only if it is still the folder that was measured (device and inode). Undo with ⌘Z while the map is shown; blocked restores wait under Retry restore; Redo is not available for folders.
+- Free up space: a sidebar screen listing known caches and app data from a built-in catalogue (Xcode, OrbStack, Docker, package managers, AI caches, browsers, messaging, Mail, backups, logs, per-app Library/Caches folders) with what each is, what happens next time and a verdict. Sizes are measured only when you press Measure all. Move to Trash… is offered only for rebuildable data and uses the same guarded folder flow with the home folder as the root; commands for developer tools are copied to the clipboard, never run; Mail, Chrome profiles, Messages and backups are explained, never moved.
+- The sidebar highlights the view you are in (Overview, Storage map, Free up space, Older files, Installers) as well as the loaded location.
+- Chat names and the chat filter are reset when Largest files switches the review to the map root, so names loaded for another WhatsApp folder are not shown there.
 
 ## 0.1.0-beta.8
 
@@ -40,7 +45,7 @@
 
 ## 0.1.0-beta.4
 
-- English is the default interface language on every Mac. Keepelix › Language offers Hebrew, which applies on the next launch with full right-to-left layout; the choice is stored for this app only.
+- English is the default interface language on every Mac. Avakasha › Language offers Hebrew, which applies on the next launch with full right-to-left layout; the choice is stored for this app only.
 - The sidebar highlights the location currently loaded, and clicking it again shows it without rescanning (Refresh rescans).
 - The package declares English and Hebrew localizations so system panels follow the chosen language.
 - The repository documentation is English only.
@@ -59,7 +64,7 @@
 
 - Add Delete-to-Trash, optional confirmation suppression, and session Undo/Redo with keyboard shortcuts and buttons.
 - Simplify the interface and confirmation dialogs.
-- Rename the project to Keepelix.
+- Rename the project to Avakasha.
 - Redesign the interface with a sidebar, native icons, clearer empty states and dedicated review actions.
 - Add a Finder Trash shortcut, old-file filters and size/date/name sorting.
 - Add a read-only synthetic demo for documentation screenshots.
@@ -70,7 +75,7 @@
 
 ## 0.1.0-beta.1
 
-First standalone release of Keepelix, replacing the personal review prototype.
+First standalone release of Avakasha, replacing the personal review prototype.
 
 - User-selected folders; asynchronous scan with progress and cancellation.
 - Keyboard preview, next-file navigation and contextual Reveal in Finder.

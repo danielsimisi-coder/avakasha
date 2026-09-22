@@ -1,5 +1,5 @@
 import Cocoa
-import KeepelixCore
+import AvakashaCore
 
 /// Home screen: how full each disk is, what this session moved to Trash, and where to start. Reads volume attributes only.
 final class OverviewPanel: NSView {
@@ -9,10 +9,10 @@ final class OverviewPanel: NSView {
     private let caveat = NSTextField(wrappingLabelWithString: L("Free space is what you can still write. Trash is not free until you empty it in Finder, and APFS clones or snapshots can change what a move frees.", "מקום פנוי הוא מה שעדיין אפשר לכתוב. הפח אינו פנוי עד שמרוקנים אותו ב־Finder, ושכפולי APFS או תמונות מצב עשויים לשנות מה שהעברה מפנה."))
     let mapHomeButton = NSButton()
     let mapDriveButton = NSButton()
-    let trashButton = NSButton()
+    let freeUpButton = NSButton()
     var onMapHome: (() -> Void)?
     var onMapDrive: (() -> Void)?
-    var onOpenTrash: (() -> Void)?
+    var onFreeUp: (() -> Void)?
     private(set) var volumes: [VolumeInfo] = []
 
     override init(frame: NSRect) {
@@ -27,11 +27,11 @@ final class OverviewPanel: NSView {
         caveat.font = .systemFont(ofSize: 11); caveat.textColor = .tertiaryLabelColor
         for (button, en, he, symbol, action) in [(mapHomeButton, "Map home folder", "מפה את תיקיית הבית", "house", #selector(mapHome)),
                                                   (mapDriveButton, "Map a folder or drive…", "מפה תיקייה או כונן…", "externaldrive", #selector(mapDrive)),
-                                                  (trashButton, "Trash in Finder", "הפח ב־Finder", "trash", #selector(openTrash))] {
+                                                  (freeUpButton, "Free up space", "פינוי מקום", "sparkles", #selector(freeUp))] {
             button.title = L(en, he); button.bezelStyle = .rounded; button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil); button.imagePosition = .imageLeading
             button.font = .systemFont(ofSize: 13, weight: .medium); button.target = self; button.action = action; button.setAccessibilityLabel(L(en, he))
         }
-        let actions = NSStackView(views: [mapHomeButton, mapDriveButton, trashButton]); actions.spacing = 10
+        let actions = NSStackView(views: [freeUpButton, mapHomeButton, mapDriveButton]); actions.spacing = 10
         let sectionDisks = label(L("DISKS", "כוננים"), 10, .semibold, secondary: true)
         let sectionSession = label(L("THIS SESSION", "ההפעלה הזו"), 10, .semibold, secondary: true)
         let sectionStart = label(L("START", "התחלה"), 10, .semibold, secondary: true)
@@ -53,7 +53,7 @@ final class OverviewPanel: NSView {
         volumes = Volumes.mounted()
         volumesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for volume in volumes {
-            let name = NSTextField(labelWithString: volume.name + (volume.isStartup ? " · " + L("startup disk", "דיסק ההפעלה") : (volume.isRemovable ? " · " + L("external", "חיצוני") : "")))
+            let name = NSTextField(labelWithString: volume.name + (volume.isStartup ? " · " + L("startup disk", "דיסק האתחול") : (volume.isRemovable ? " · " + L("external", "חיצוני") : "")))
             name.font = .systemFont(ofSize: 13, weight: .medium)
             let numbers = NSTextField(labelWithString: L("Used ", "בשימוש ") + bytes(volume.used) + L(" of ", " מתוך ") + bytes(volume.total) + " · " + L("free ", "פנוי ") + bytes(volume.available))
             numbers.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular); numbers.textColor = .secondaryLabelColor
@@ -65,11 +65,11 @@ final class OverviewPanel: NSView {
         if volumes.isEmpty { volumesStack.addArrangedSubview(NSTextField(labelWithString: L("No volume information available.", "אין מידע על כוננים."))) }
         sessionLabel.stringValue = sessionMoved > 0
             ? L("Moved to Trash this session: ", "הועבר לפח בהפעלה זו: ") + bytes(sessionMoved) + " · " + L("empty Trash in Finder when you are sure.", "רוקן את הפח ב־Finder כשאתה בטוח.")
-            : L("Nothing moved to Trash yet. Choose a location in the sidebar, or map a drive to see what fills it.", "עדיין לא הועבר דבר לפח. בחר מיקום בסרגל הצדדי, או מפה כונן כדי לראות מה ממלא אותו.")
+            : L("Nothing moved to Trash yet. Start with Free up space, or map a drive to see what fills it.", "עדיין לא הועבר דבר לפח. התחל ב״פינוי מקום״, או מפה כונן כדי לראות מה ממלא אותו.")
     }
     @objc private func mapHome() { onMapHome?() }
     @objc private func mapDrive() { onMapDrive?() }
-    @objc private func openTrash() { onOpenTrash?() }
+    @objc private func freeUp() { onFreeUp?() }
 }
 
 private extension NSLayoutConstraint {

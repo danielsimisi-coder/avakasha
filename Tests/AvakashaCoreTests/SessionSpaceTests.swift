@@ -1,6 +1,6 @@
 import XCTest
 import Foundation
-@testable import KeepelixCore
+@testable import AvakashaCore
 
 /// Session "space" summary: bytes moved to Trash this session (allocated blocks) and free space on a volume.
 final class SessionSpaceTests: XCTestCase {

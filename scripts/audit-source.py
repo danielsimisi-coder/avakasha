@@ -8,13 +8,18 @@ import subprocess
 root = pathlib.Path(__file__).resolve().parents[1]
 # Every reviewed synthetic version of each image, so historical blobs stay verifiable.
 artwork = {
+    'assets/avakasha-preview.png': {'de27146eec2287094fd61eda87be6806c34399f2c6c98250e85370486f0882fc', '454c6a7863bbfd437fa25622076727b5c62fbf76c657eb870fb0aeedc21083e8'},
+    'assets/avakasha-older-files.png': {'4e51d5dfa9610f64fdbd84e1df64132fe943768897bf53fb57ef5245f505e2f4', '6472fdc44bccb5f9cd49cec3e641144180d89904d81770854bdbab8431f6dfd3'},
+    'assets/avakasha-storage-map.png': {'1260c7ae83e01b4d35b12c5bae6e621067b6d294efbc65078281231e3a6e83e3'},
+    'assets/avakasha-hebrew.png': {'35d47605559f3408daf487d12b490cbc8e4b0d4ad226456528891ec449591659'},
+    'assets/avakasha-video.png': {'42245c97681e81e00d511b253f803c4471bd5739115b8d6619965edd8ae52bb7'},
     'assets/keepelix-preview.png': {'de27146eec2287094fd61eda87be6806c34399f2c6c98250e85370486f0882fc', '454c6a7863bbfd437fa25622076727b5c62fbf76c657eb870fb0aeedc21083e8'},
     'assets/keepelix-older-files.png': {'4e51d5dfa9610f64fdbd84e1df64132fe943768897bf53fb57ef5245f505e2f4', '6472fdc44bccb5f9cd49cec3e641144180d89904d81770854bdbab8431f6dfd3'},
     'assets/keepelix-storage-map.png': {'1260c7ae83e01b4d35b12c5bae6e621067b6d294efbc65078281231e3a6e83e3'},
     'assets/keepelix-hebrew.png': {'35d47605559f3408daf487d12b490cbc8e4b0d4ad226456528891ec449591659'},
     'assets/keepelix-video.png': {'42245c97681e81e00d511b253f803c4471bd5739115b8d6619965edd8ae52bb7'},
-    'assets/icon-1024.png': {'95ff2ed3079abdc2143948ec1586c53a19fbdeb30ecbefa06d37c99f2129531b'},
-    'assets/AppIcon.icns': {'9f603b3652db574dae84fa3b67f738a1455618a58590204bdee54be5f574dc97'},
+    'assets/icon-1024.png': {'95ff2ed3079abdc2143948ec1586c53a19fbdeb30ecbefa06d37c99f2129531b', '019380b7d4997cc8c8f83ea40672fac25bdd2a4f10c6f69fcb7eaa9c75132db7'},
+    'assets/AppIcon.icns': {'9f603b3652db574dae84fa3b67f738a1455618a58590204bdee54be5f574dc97', '876a9099c5e0b7aec0a93ea8c2b68adc394d9accaaf2cfb2862ac749a50df7be'},
 }
 failures = []
 patterns = [

@@ -2,7 +2,7 @@
 name: Bug report
 about: Report unexpected behavior using synthetic examples
 ---
-**macOS and Keepelix version**
+**macOS and Avakasha version**
 
 **Steps to reproduce**
 

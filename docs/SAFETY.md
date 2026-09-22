@@ -1,6 +1,6 @@
 # Review before removing
 
-Keepelix moves selected regular files to the operating system's Trash. It never empties Trash and does not provide permanent deletion.
+Avakasha moves selected regular files to the operating system's Trash. It never empties Trash and does not provide permanent deletion.
 
 ## What the app checks
 
@@ -33,6 +33,22 @@ Undo/Redo history is separate for each chosen folder during the session. Switchi
 
 ## Storage map
 
-The map reads names, sizes and filesystem flags only; it never reads file contents and never moves files. It does not follow symbolic links, does not enter other volumes mounted below the chosen folder, does not descend into cloud placeholders that are not downloaded, and measures bundles without listing their contents. Hard-linked data is counted once. Folders that cannot be read are listed as not accessible and excluded from totals rather than estimated. Cancelling keeps partial totals and says so. Sizes are allocated blocks, not a promise of reclaimable space: APFS clones, snapshots, sparse files, hard links and Trash all change what emptying would free. Hidden folders are shown because they often hold the space; app and system data inside them deserve extra care before review.
+The map reads names, sizes and filesystem flags only; it never reads file contents. The only action it can take is the checked whole-folder move described under Whole folders below; the measurement itself moves nothing. It does not follow symbolic links, does not enter other volumes mounted below the chosen folder, does not descend into cloud placeholders that are not downloaded, and measures bundles without listing their contents. Hard-linked data is counted once. Folders that cannot be read are listed as not accessible and excluded from totals rather than estimated. Cancelling keeps partial totals and says so. Sizes are allocated blocks, not a promise of reclaimable space: APFS clones, snapshots, sparse files, hard links and Trash all change what emptying would free. Hidden folders are shown because they often hold the space; app and system data inside them deserve extra care before review.
 
 The Largest files view uses the mapped folder as its safety root: each file from the map is validated against that root before it is listed, and every move from that list is checked against the same root, identity and path rules as any other review. The list follows the file-review exclusions (no bundle contents, hidden files, cloud placeholders or app databases) and is at most 200 files, partial if the measurement was cancelled.
+
+## Whole folders
+
+Moving a whole folder to Trash is the most far-reaching action in the app, so it is gated harder than file moves. It is reached from two places only: the storage map (Delete or Move folder to Trash…) and Free up space (Move to Trash…, rebuildable rows only). Both go through one flow:
+
+- **Check.** The folder must sit strictly inside the safety root (the mapped folder, or the home folder for Free up space) and must not be the root itself, a symbolic link or a path through one, a package, a hidden folder or a cloud placeholder. The map additionally never offers the root, bundles, hidden or unreadable folders, or folders with unmeasured items. The folder's identity (device and inode) is recorded at this point.
+- **Fresh measurement.** The folder is measured again right then, not from the map on screen. If the fresh walk finds anything it could not count (not accessible, not downloaded, or on another volume), the move is refused and the app suggests reviewing the files instead. Stopping the measurement moves nothing.
+- **Confirmation, always.** The dialog shows the fresh size, file and folder counts and the path. It is shown every time; the "Do not show again" preference for file moves does not apply to folders.
+- **Move with identity check.** Immediately before moving, the folder is checked again and must still be the folder that was measured; otherwise nothing moves. After the move the Trash item must keep the same identity; if it does not, the app tries to put the folder back and reports what happened.
+- **Undo, no Redo.** The folder is recorded as one undo item in the history of its root. Undo restores it only when nothing occupies the original path, the original parent is not a link and the Trash item is still the same folder; a blocked restore waits under Retry restore and does not block earlier batches. Redo is never offered for folders, because redoing would have to trust a path rather than an identity. A folder that is no longer in Trash is reported once and dropped from the waiting list.
+
+Refused outright: the mapped root, folders outside the root, links, packages and bundles, hidden folders, cloud placeholders, unreadable folders, folders with caveats in the fresh measurement, and any folder whose identity changed between the measurement and the move.
+
+## Free up space
+
+The verdict on each row (rebuildable, clean from the app itself, command in Terminal, cleared on restart, review before touching) is a judgement encoded in a catalogue in the source, based on what the owning tools are known to recreate. It is not a guarantee: a cache can hold something you wanted, and a tool can change what it keeps. Only rebuildable rows can be moved, through the whole-folder flow above with the home folder as the root. Mail, Chrome profiles, Messages attachments, iPhone backups, Docker and OrbStack data are explained and pointed to their own cleanup; the app never moves them. Commands are copied to the clipboard and never executed by the app. Those commands delete through the tool itself: nothing goes to Trash and the app cannot undo them, so read a command before running it. Sizes are measured only on request. Close the owning app before moving its cache. The user decides.

@@ -1,11 +1,11 @@
 import XCTest
 import Foundation
-@testable import KeepelixCore
+@testable import AvakashaCore
 
 final class InstallersTests: XCTestCase {
     var root: URL!
     override func setUpWithError() throws {
-        root=FileManager.default.temporaryDirectory.appendingPathComponent("KeepelixInstallers-"+UUID().uuidString)
+        root=FileManager.default.temporaryDirectory.appendingPathComponent("AvakashaInstallers-"+UUID().uuidString)
         try FileManager.default.createDirectory(at:root,withIntermediateDirectories:true)
     }
     override func tearDownWithError() throws { try FileManager.default.removeItem(at:root) }

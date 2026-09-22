@@ -5,7 +5,7 @@ import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
 import SQLite3
-@testable import KeepelixCore
+@testable import AvakashaCore
 
 final class CoreTests: XCTestCase {
     var base: URL!; var root: URL!; var trash: URL!
@@ -41,13 +41,13 @@ final class CoreTests: XCTestCase {
     }
     func testSystemTrashRoundTripWithOwnedSyntheticFile()throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["FILETRIAGE_SYSTEM_TRASH_TEST"] == "1", "Opt-in integration test; uses only this test's generated file")
-        let a=try file("Keepelix-synthetic-"+UUID().uuidString+".txt","Disposable Keepelix integration fixture")
+        let a=try file("Avakasha-synthetic-"+UUID().uuidString+".txt","Disposable Avakasha integration fixture")
         let result=TrashService.move([a],root:root)
         XCTAssertTrue(result.failures.isEmpty, result.failures.map(\.message).joined(separator:"; "))
         XCTAssertEqual(result.tickets.count,1)
         let restored=TrashService.undo(result.tickets,root:root)
         XCTAssertTrue(restored.failures.isEmpty);XCTAssertEqual(restored.restored,[a.url])
-        XCTAssertEqual(try String(contentsOf:a.url),"Disposable Keepelix integration fixture")
+        XCTAssertEqual(try String(contentsOf:a.url),"Disposable Avakasha integration fixture")
     }
     func testChangedFileIsNotMoved()throws{
         let r=try file("changed.txt");try Data("new bytes".utf8).write(to:r.url)
@@ -137,7 +137,7 @@ final class CoreTests: XCTestCase {
     func testDifferentExtendedAttributesBlockAutoSelection()throws {
         let a=try file("a.txt"),b=try file("b.txt")
         let bytes=Array("unique tag".utf8)
-        XCTAssertEqual(bytes.withUnsafeBytes{setxattr(b.id,"org.keepelix.fixture",$0.baseAddress,$0.count,0,0)},0)
+        XCTAssertEqual(bytes.withUnsafeBytes{setxattr(b.id,"org.avakasha.fixture",$0.baseAddress,$0.count,0,0)},0)
         let selection=ExactDuplicates.selectExtras([DuplicateGroup(members:[a,b])],visible:[a.id,b.id])
         XCTAssertTrue(selection.ids.isEmpty)
     }

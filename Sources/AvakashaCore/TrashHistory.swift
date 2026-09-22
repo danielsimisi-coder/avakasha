@@ -38,8 +38,8 @@ public final class TrashHistory {
     }
 
     /// Moves one whole folder (checked and measured moments before by the caller) and records it for Undo. Not redoable.
-    public func moveFolder(_ folder: URL, root: URL, expected: FolderIdentity, bytes: Int64, backend: TrashBackend = SystemTrash()) -> FolderMoveResult {
-        let result = FolderTrash.move(folder, root: root, expected: expected, backend: backend)
+    public func moveFolder(_ folder: URL, root: URL, expected: FolderIdentity, bytes: Int64, allowHiddenAncestors: Bool = false, backend: TrashBackend = SystemTrash()) -> FolderMoveResult {
+        let result = FolderTrash.move(folder, root: root, expected: expected, allowHiddenAncestors: allowHiddenAncestors, backend: backend)
         if let ticket = result.ticket {
             undoStack.append(UndoBatch(root: root, tickets: [], keepers: [:], folders: [ticket]))
             redoStack.removeAll()
@@ -91,7 +91,7 @@ public final class TrashHistory {
         for ticket in batch.folders {
             var s = stat()
             let gone = ticket.trashed.withUnsafeFileSystemRepresentation({ lstat($0, &s) }) != 0 && errno == ENOENT
-            if gone { folderFailures.append(FileFailure(url: ticket.original, message: "The folder is no longer in Trash, so it cannot be restored by Keepelix. It may have been restored in Finder or Trash was emptied.")); continue }
+            if gone { folderFailures.append(FileFailure(url: ticket.original, message: "The folder is no longer in Trash, so it cannot be restored by Avakasha. It may have been restored in Finder or Trash was emptied.")); continue }
             let outcome = FolderTrash.restore(ticket, root: batch.root, backend: backend)
             if outcome.restored { restoredFolders.append(ticket.original.standardizedFileURL); discountFolder(ticket) }
             else { pendingFolders.append(ticket); if let f = outcome.failure { folderFailures.append(f) } }
@@ -101,7 +101,7 @@ public final class TrashHistory {
         for (ticket, failure) in zip(attempt.pending, attempt.failures) {
             var s = stat()
             if ticket.trashed.withUnsafeFileSystemRepresentation({ lstat($0, &s) }) != 0 && errno == ENOENT {
-                failures.append(FileFailure(url: ticket.original, message: "The item is no longer in Trash, so it cannot be restored by Keepelix. It may have been restored in Finder or Trash was emptied."))
+                failures.append(FileFailure(url: ticket.original, message: "The item is no longer in Trash, so it cannot be restored by Avakasha. It may have been restored in Finder or Trash was emptied."))
             } else { pending.append(ticket); failures.append(failure) }
         }
         let result = RestoreResult(restored: attempt.restored + restoredFolders, pending: pending, failures: failures + folderFailures, pendingFolders: pendingFolders)

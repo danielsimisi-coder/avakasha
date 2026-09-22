@@ -26,7 +26,7 @@ public struct KnownLocation: Equatable, Identifiable {
     public init(id: String, relativePath: String, category: String, safety: CleanupSafety, command: String? = nil) {
         self.id = id; self.relativePath = relativePath; self.category = category; self.safety = safety; self.command = command
     }
-    public func url(home: URL) -> URL { home.appendingPathComponent(relativePath, isDirectory: true) }
+    public func url(home: URL) -> URL { home.appendingPathComponent(relativePath, isDirectory: true).standardizedFileURL }
 }
 
 public struct LocationMeasurement: Equatable {
@@ -104,12 +104,15 @@ public enum KnownLocations {
     public static func cacheFolders(in home: URL) -> [KnownLocation] {
         let caches = home.appendingPathComponent("Library/Caches", isDirectory: true)
         guard let names = try? FileManager.default.contentsOfDirectory(atPath: caches.path) else { return [] }
-        let curated = Set(all.map { $0.relativePath })
+        let curated = all.map { $0.relativePath }
         return names.sorted().compactMap { name in
             let relative = "Library/Caches/" + name
-            guard !name.hasPrefix("."), !curated.contains(relative) else { return nil }
+            // A folder that is, or contains, a curated entry keeps the curated verdict; it is never offered as plain rebuildable.
+            guard !name.hasPrefix("."), !curated.contains(where: { $0 == relative || $0.hasPrefix(relative + "/") }) else { return nil }
+            let url = caches.appendingPathComponent(name)
             var isDirectory: ObjCBool = false
-            guard FileManager.default.fileExists(atPath: caches.appendingPathComponent(name).path, isDirectory: &isDirectory), isDirectory.boolValue else { return nil }
+            guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue,
+                  (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true else { return nil }
             return KnownLocation(id: "cache." + name, relativePath: relative, category: apps, safety: .rebuildable)
         }
     }

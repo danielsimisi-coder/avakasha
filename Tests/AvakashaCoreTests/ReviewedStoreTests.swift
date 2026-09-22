@@ -1,6 +1,6 @@
 import XCTest
 import Foundation
-@testable import KeepelixCore
+@testable import AvakashaCore
 
 final class ReviewedStoreTests: XCTestCase {
     var base: URL!

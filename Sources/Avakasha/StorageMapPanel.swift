@@ -1,5 +1,5 @@
 import Cocoa
-import KeepelixCore
+import AvakashaCore
 
 /// A row in the storage map: a subfolder, or the loose files directly inside the current folder.
 struct MapRow {
@@ -196,7 +196,8 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
     @objc private func rescanTapped() { onRescan?() }
     /// A subfolder row that the guarded whole-folder move may consider: never the root, a bundle, a hidden or unreadable folder, or one with unmeasured items.
     var trashableFolder: StorageNode? {
-        guard let node = selectedRow?.node, node.parent != nil, !node.isPackage, !node.isHidden, !node.isUnreadable, !node.hasCaveats else { return nil }
+        guard let node = selectedRow?.node, node.parent != nil, !node.isPackage, !node.isHidden, !node.isUnreadable, !node.hasCaveats,
+              !node.trail.dropFirst().contains(where: \.isHidden) else { return nil } // nothing under a hidden folder, as in file review
         return node
     }
     @objc func trashTapped() { if let node = trashableFolder { onTrashFolder?(node) } else { NSSound.beep() } }

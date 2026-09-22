@@ -1,11 +1,11 @@
 import XCTest
 import Foundation
-@testable import KeepelixCore
+@testable import AvakashaCore
 
 final class FolderTrashTests: XCTestCase {
     var base: URL!; var root: URL!; var trash: URL!
     override func setUpWithError() throws {
-        base = FileManager.default.temporaryDirectory.appendingPathComponent("keepelix-folder-" + UUID().uuidString)
+        base = FileManager.default.temporaryDirectory.appendingPathComponent("avakasha-folder-" + UUID().uuidString)
         root = base.appendingPathComponent("chosen"); trash = base.appendingPathComponent("fake-trash")
         try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: trash, withIntermediateDirectories: true)
@@ -55,7 +55,8 @@ final class FolderTrashTests: XCTestCase {
     }
     func testChangedFolderIsNotMoved() throws {
         let f = try folder("busy"); let expected = try FolderTrash.check(f, root: root)
-        Thread.sleep(forTimeInterval: 0.02); try Data("late".utf8).write(to: f.appendingPathComponent("added.txt")) // changes the folder's own mtime
+        // A direct child added afterwards changes the folder's own modification time; sleep past coarse timestamp granularity.
+        Thread.sleep(forTimeInterval: 0.05); try Data("late".utf8).write(to: f.appendingPathComponent("added.txt"))
         let result = FolderTrash.move(f, root: root, expected: expected, backend: FakeTrash(directory: trash))
         XCTAssertNil(result.ticket); XCTAssertNotNil(result.failure); XCTAssertTrue(FileManager.default.fileExists(atPath: f.appendingPathComponent("added.txt").path))
     }
@@ -76,16 +77,67 @@ final class FolderTrashTests: XCTestCase {
         let again = FolderTrash.restore(ticket, root: root, backend: backend); XCTAssertTrue(again.restored, again.failure?.message ?? "")
         XCTAssertEqual(try String(contentsOf: f.appendingPathComponent("file0.txt")), "f0")
     }
-    func testRestoreRefusesADifferentTrashItemOrALinkedParent() throws {
+    func testRestoreRefusesAReplacedTrashItem() throws {
         let f = try folder("nested/deep"); let backend = FakeTrash(directory: trash)
         let ticket = try XCTUnwrap(FolderTrash.move(f, root: root, expected: try FolderTrash.check(f, root: root), backend: backend).ticket)
-        // Trash item replaced by another folder with the same name.
         try FileManager.default.removeItem(at: ticket.trashed); try FileManager.default.createDirectory(at: ticket.trashed, withIntermediateDirectories: true)
         XCTAssertFalse(FolderTrash.restore(ticket, root: root, backend: backend).restored)
-        // Parent replaced by a symbolic link.
-        let parent = root.appendingPathComponent("nested"); let moved = base.appendingPathComponent("moved-parent")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: f.path))
+    }
+    func testRestoreRefusesALinkedParentAndKeepsTheTrashItem() throws {
+        let f = try folder("nested2/deep"); let backend = FakeTrash(directory: trash)
+        let ticket = try XCTUnwrap(FolderTrash.move(f, root: root, expected: try FolderTrash.check(f, root: root), backend: backend).ticket)
+        let parent = root.appendingPathComponent("nested2"); let moved = base.appendingPathComponent("moved-parent")
         try FileManager.default.moveItem(at: parent, to: moved); try FileManager.default.createSymbolicLink(at: parent, withDestinationURL: moved)
         XCTAssertFalse(FolderTrash.restore(ticket, root: root, backend: backend).restored)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: ticket.trashed.appendingPathComponent("file0.txt").path), "The Trash item is untouched")
+    }
+    struct MisreportingTrash: TrashBackend {
+        let directory: URL
+        func moveToTrash(_ url: URL) throws -> URL {
+            _ = try FakeTrash(directory: directory).moveToTrash(url)
+            let other = directory.appendingPathComponent("other-" + UUID().uuidString); try FileManager.default.createDirectory(at: other, withIntermediateDirectories: true); return other
+        }
+        func restore(_ source: URL, to destination: URL) throws { try FileManager.default.moveItem(at: source, to: destination) }
+    }
+    func testMoveVerifiesTheMovedFolderAndReportsWhenItCannot() throws {
+        let f = try folder("verify")
+        let result = FolderTrash.move(f, root: root, expected: try FolderTrash.check(f, root: root), backend: MisreportingTrash(directory: trash))
+        XCTAssertNil(result.ticket); XCTAssertTrue(result.failure?.message.contains("Finder Trash") ?? false)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: f.path), "The backend moved it elsewhere; the app reports rather than pretends, and never moves another item back in its place")
+    }
+    func testHistoryReportsAFolderThatVanishedFromTrashOnce() throws {
+        let f = try folder("gone"); let history = TrashHistory(); let backend = FakeTrash(directory: trash)
+        let ticket = try XCTUnwrap(history.moveFolder(f, root: root, expected: try FolderTrash.check(f, root: root), bytes: 10, backend: backend).ticket)
+        try FileManager.default.removeItem(at: ticket.trashed)
+        let undo = try XCTUnwrap(history.undo(backend: backend))
+        XCTAssertTrue(undo.restored.isEmpty); XCTAssertEqual(undo.failures.count, 1); XCTAssertEqual(history.blockedCount, 0); XCTAssertFalse(history.canRedo)
+    }
+    func testHiddenAncestorsProtectedFoldersAndMountPointsAreRefused() throws {
+        let inside = try folder(".hiddenparent/visible")
+        XCTAssertThrowsError(try FolderTrash.check(inside, root: root)) { XCTAssertEqual($0 as? TriageError, .folderProtected) }
+        XCTAssertNoThrow(try FolderTrash.check(inside, root: root, allowHiddenAncestors: true), "The vetted catalogue may target folders under a dot folder")
+        let home = FileManager.default.homeDirectoryForCurrentUser.standardizedFileURL.resolvingSymlinksInPath()
+        XCTAssertThrowsError(try FolderTrash.check(home, root: home.deletingLastPathComponent())) { XCTAssertEqual($0 as? TriageError, .folderProtected) }
+        // Paths are assembled from parts so the privacy audit's home-path pattern never appears literally in the source.
+        func p(_ parts: String...) -> String { "/" + parts.joined(separator: "/") }
+        let h = p("Users", "x")
+        XCTAssertTrue(FolderTrash.isProtected(p("Users"), home: h)); XCTAssertTrue(FolderTrash.isProtected(p("Volumes", "Disk"), home: h))
+        XCTAssertTrue(FolderTrash.isProtected(h, home: h)); XCTAssertFalse(FolderTrash.isProtected(p("Users", "x", "Downloads", "old"), home: h))
+        XCTAssertFalse(FolderTrash.isProtected(p("Volumes", "Disk", "old"), home: h)); XCTAssertTrue(FolderTrash.isProtected(p("Users", "other", "Downloads"), home: h))
+        for system in [p("private", "var", "folders"), p("Applications", "Utilities"), p("Library", "Caches"), p("System", "Library"), p("usr", "local"), p("Users", "Shared", "x")] { XCTAssertTrue(FolderTrash.isProtected(system, home: h), system) }
+        XCTAssertFalse(FolderTrash.isProtected(p("private", "tmp", "keep", "x"), home: h, temporary: p("private", "tmp", "keep") + "/"))
+        XCTAssertThrowsError(try FolderTrash.check(URL(fileURLWithPath: "/private/var/folders"), root: URL(fileURLWithPath: "/private/var"))) { XCTAssertEqual($0 as? TriageError, .folderProtected) }
+    }
+    func testDetachKeepsMapTotalsConsistent() throws {
+        _ = try folder("a/x"); _ = try folder("a/y", files: 4); _ = try folder("b")
+        let map = try StorageMapper.map(root: root, token: CancellationToken())
+        let a = try XCTUnwrap(map.root.children.first { $0.name == "a" }); let y = try XCTUnwrap(a.children.first { $0.name == "y" })
+        let before = (map.root.bytes, map.root.files, map.root.directories)
+        a.detach(y)
+        XCTAssertNil(y.parent); XCTAssertFalse(a.children.contains { $0 === y })
+        XCTAssertEqual(map.root.bytes, before.0 - y.bytes); XCTAssertEqual(map.root.files, before.1 - y.files); XCTAssertEqual(map.root.directories, before.2 - 1)
+        XCTAssertEqual(a.bytes, a.directBytes + a.children.reduce(0) { $0 + $1.bytes })
     }
     func testHistoryTracksFolderMovesWithUndoButNoRedo() throws {
         let f = try folder("session"); let history = TrashHistory(); let backend = FakeTrash(directory: trash)

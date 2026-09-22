@@ -1,5 +1,5 @@
 import Cocoa
-import KeepelixCore
+import AvakashaCore
 
 /// Human wording for a catalogue entry: what it is, what happens next time, and how to clean it when the app cannot.
 struct LocationText {
@@ -15,14 +15,16 @@ enum LocationTexts {
                                 next: L("The app rebuilds what it needs the next time it runs.", "האפליקציה תבנה מחדש את מה שהיא צריכה בהפעלה הבאה."), howTo: nil)
         }
         switch location.id {
-        case "xcode.simulators": return LocationText(title: L("Xcode simulators", "סימולטורים של Xcode"), what: L("Simulated iPhones, iPads and watches with the apps and data installed on them.", "מכשירי iPhone, iPad ושעונים מדומים, עם האפליקציות והנתונים שמותקנים בהם."), next: L("Xcode creates fresh simulators in one click; test data inside them is gone.", "Xcode יוצר סימולטורים חדשים בלחיצה; נתוני בדיקה שבתוכם נמחקים."), howTo: L("Deleting simulators must go through Xcode's tool so it stays consistent. Copy the command and run it in Terminal.", "מחיקת סימולטורים חייבת לעבור דרך הכלי של Xcode כדי להישאר עקבית. העתק את הפקודה והרץ ב־Terminal."))
+        case "xcode.simulators": return LocationText(title: L("Xcode simulators", "סימולטורים של Xcode"), what: L("Simulated iPhones, iPads and watches with the apps and data installed on them.", "מכשירי iPhone, iPad ושעונים מדומים, עם האפליקציות והנתונים שמותקנים בהם."), next: L("The command removes only simulators whose runtime is no longer installed; the rest and their data stay.", "הפקודה מסירה רק סימולטורים שסביבת הריצה שלהם כבר לא מותקנת; השאר והנתונים שלהם נשארים."), howTo: L("To remove more, delete devices in Xcode › Window › Devices and Simulators. Copy the command and run it in Terminal yourself.", "להסרה נוספת מחק מכשירים ב־Xcode › Window › Devices and Simulators. העתק את הפקודה והרץ אותה בעצמך ב־Terminal."))
         case "xcode.simulatorCaches": return LocationText(title: L("Simulator caches", "מטמוני סימולטור"), what: L("Runtime caches for the simulators.", "מטמוני ריצה של הסימולטורים."), next: L("Recreated automatically.", "נוצרים מחדש אוטומטית."), howTo: nil)
-        case "xcode.deviceSupport", "xcode.watchDeviceSupport": return LocationText(title: L("Xcode device support files", "קבצי תמיכה במכשירים של Xcode"), what: L("Debug symbols for each iOS version of the devices you connected.", "סמלי דיבאג לכל גרסת iOS של המכשירים שחיברת."), next: L("Xcode downloads them again the next time you connect the device; a few minutes.", "Xcode יוריד אותם שוב בחיבור הבא של המכשיר; כמה דקות."), howTo: nil)
+        case "xcode.deviceSupport": return LocationText(title: L("iOS device support files", "קבצי תמיכה במכשירי iOS"), what: L("Debug symbols for each iOS version of the iPhones and iPads you connected.", "סמלי דיבאג לכל גרסת iOS של מכשירי iPhone ו־iPad שחיברת."), next: L("Xcode downloads them again the next time you connect the device; a few minutes.", "Xcode יוריד אותם שוב בחיבור הבא של המכשיר; כמה דקות."), howTo: nil)
+        case "xcode.watchDeviceSupport": return LocationText(title: L("watchOS device support files", "קבצי תמיכה במכשירי watchOS"), what: L("Debug symbols for each iOS version of the devices you connected.", "סמלי דיבאג לכל גרסת iOS של המכשירים שחיברת."), next: L("Xcode downloads them again the next time you connect the device; a few minutes.", "Xcode יוריד אותם שוב בחיבור הבא של המכשיר; כמה דקות."), howTo: nil)
         case "xcode.derivedData": return LocationText(title: L("Xcode DerivedData", "DerivedData של Xcode"), what: L("Build products and indexes for every project you opened.", "תוצרי בנייה ואינדקסים לכל פרויקט שפתחת."), next: L("The next build recreates them; the first build is slower.", "הבנייה הבאה יוצרת אותם מחדש; הבנייה הראשונה איטית יותר."), howTo: nil)
         case "xcode.archives": return LocationText(title: L("Xcode archives", "ארכיוני Xcode"), what: L("Builds you archived for the App Store or for distribution, with their debug symbols.", "גרסאות שארכבת ל־App Store או להפצה, עם סמלי הדיבאג שלהן."), next: L("Old archives cannot be recreated. Keep the ones for versions still in use.", "ארכיונים ישנים לא ניתן לשחזר. שמור את אלה של גרסאות שעדיין בשימוש."), howTo: L("Xcode › Window › Organizer › Archives lets you delete old ones.", "Xcode › Window › Organizer › Archives מאפשר למחוק ישנים."))
         case "xcode.caches": return LocationText(title: L("Xcode cache", "מטמון Xcode"), what: L("Temporary Xcode data.", "נתונים זמניים של Xcode."), next: L("Recreated automatically.", "נוצר מחדש אוטומטית."), howTo: nil)
-        case "orbstack", "orbstack.data": return LocationText(title: "OrbStack", what: L("Container images, volumes and Linux machines.", "תמונות קונטיינרים, נפחים ומכונות Linux."), next: L("Images download again; containers and their data do not come back.", "תמונות יורדות שוב; קונטיינרים והנתונים שלהם לא חוזרים."), howTo: L("Delete unused machines and images from OrbStack itself so it stays consistent.", "מחק מכונות ותמונות שאינן בשימוש מתוך OrbStack עצמו כדי שיישאר עקבי."))
-        case "docker.vms": return LocationText(title: "Docker Desktop", what: L("The virtual disk that holds all images, containers and volumes.", "הדיסק הווירטואלי שמכיל את כל התמונות, הקונטיינרים והנפחים."), next: L("Images download again; container data does not come back.", "תמונות יורדות שוב; נתוני קונטיינרים לא חוזרים."), howTo: L("Docker Desktop › Settings › Resources › Advanced, or docker system prune.", "Docker Desktop › Settings › Resources › Advanced, או docker system prune."))
+        case "orbstack": return LocationText(title: "OrbStack", what: L("Container images, volumes and Linux machines.", "אימג׳ים של קונטיינרים, נפחים ומכונות Linux."), next: L("Images download again; containers and their data do not come back.", "אימג׳ים יורדים שוב; קונטיינרים והנתונים שלהם לא חוזרים."), howTo: L("Delete unused machines and images from OrbStack itself so it stays consistent.", "מחק מכונות ואימג׳ים שאינם בשימוש מתוך OrbStack עצמו כדי שיישאר עקבי."))
+        case "orbstack.data": return LocationText(title: L("OrbStack data", "נתוני OrbStack"), what: L("OrbStack's own configuration and machine state.", "ההגדרות ומצב המכונות של OrbStack עצמו."), next: L("Images download again; containers and their data do not come back.", "תמונות יורדות שוב; קונטיינרים והנתונים שלהם לא חוזרים."), howTo: L("Delete unused machines and images from OrbStack itself so it stays consistent.", "מחק מכונות ותמונות שאינן בשימוש מתוך OrbStack עצמו כדי שיישאר עקבי."))
+        case "docker.vms": return LocationText(title: "Docker Desktop", what: L("The virtual disk that holds all images, containers and volumes.", "הדיסק הווירטואלי שמכיל את כל האימג׳ים, הקונטיינרים והנפחים."), next: L("Images download again; container data does not come back.", "אימג׳ים יורדים שוב; נתוני קונטיינרים לא חוזרים."), howTo: L("Docker Desktop › Settings › Resources › Advanced, or docker system prune.", "Docker Desktop › Settings › Resources › Advanced, או docker system prune."))
         case "npm.cache": return LocationText(title: L("npm cache", "מטמון npm"), what: L("Downloaded packages kept for faster installs.", "חבילות שהורדו ונשמרות להתקנות מהירות יותר."), next: L("Downloaded again on the next install.", "יורדות שוב בהתקנה הבאה."), howTo: L("Use npm's own command so its index stays consistent.", "השתמש בפקודה של npm עצמו כדי שהאינדקס יישאר עקבי."))
         case "pnpm.store": return LocationText(title: L("pnpm store", "מאגר pnpm"), what: L("Shared packages for every pnpm project.", "חבילות משותפות לכל פרויקטי pnpm."), next: L("prune removes only packages no project uses.", "prune מסיר רק חבילות שאף פרויקט לא משתמש בהן."), howTo: nil)
         case "yarn.cache": return LocationText(title: L("Yarn cache", "מטמון Yarn"), what: L("Downloaded packages.", "חבילות שהורדו."), next: L("Downloaded again when needed.", "יורדות שוב בעת הצורך."), howTo: nil)
@@ -34,7 +36,7 @@ enum LocationTexts {
         case "cargo.registry": return LocationText(title: L("Cargo registry", "מאגר Cargo"), what: L("Downloaded Rust crates.", "Crates של Rust שהורדו."), next: L("Downloaded again on the next build.", "יורדים שוב בבנייה הבאה."), howTo: nil)
         case "go.modcache": return LocationText(title: L("Go module cache", "מטמון מודולים של Go"), what: L("Downloaded Go modules.", "מודולי Go שהורדו."), next: L("Downloaded again on the next build.", "יורדים שוב בבנייה הבאה."), howTo: nil)
         case "codex.cache": return LocationText(title: "Codex", what: L("Sessions and local data of the Codex CLI.", "סשנים ונתונים מקומיים של Codex CLI."), next: L("Session history would be lost.", "היסטוריית הסשנים תאבד."), howTo: L("Review inside the folder; keep what you still need.", "סקור בתוך התיקייה; שמור מה שעדיין נחוץ."))
-        case "claude.vmBundles": return LocationText(title: L("Claude Desktop sandbox images", "תמונות הסנדבוקס של Claude Desktop"), what: L("Virtual machine bundles for the local environment.", "חבילות מכונה וירטואלית לסביבה המקומית."), next: L("The app downloads them again; quit Claude first.", "האפליקציה מורידה אותן שוב; סגור את Claude קודם."), howTo: nil)
+        case "claude.vmBundles": return LocationText(title: L("Claude Desktop sandbox images", "אימג׳ים של הסנדבוקס של Claude Desktop"), what: L("Virtual machine bundles for the local environment.", "חבילות מכונה וירטואלית לסביבה המקומית."), next: L("The app downloads them again; quit Claude first.", "האפליקציה מורידה אותן שוב; סגור את Claude קודם."), howTo: nil)
         case "ai.huggingface": return LocationText(title: L("Hugging Face models", "מודלים של Hugging Face"), what: L("Downloaded AI models and datasets.", "מודלים ומערכי נתונים שהורדו."), next: L("Downloaded again the next time a script uses them.", "יורדים שוב בפעם הבאה שסקריפט משתמש בהם."), howTo: nil)
         case "ai.torch": return LocationText(title: L("PyTorch cache", "מטמון PyTorch"), what: L("Downloaded model weights.", "משקולות מודלים שהורדו."), next: L("Downloaded again when used.", "יורדות שוב בשימוש."), howTo: nil)
         case "ai.whisper": return LocationText(title: L("Whisper models", "מודלים של Whisper"), what: L("Downloaded speech models.", "מודלי דיבור שהורדו."), next: L("Downloaded again when used.", "יורדים שוב בשימוש."), howTo: nil)
@@ -47,14 +49,16 @@ enum LocationTexts {
         case "system.caches": return LocationText(title: L("All app caches", "כל מטמוני האפליקציות"), what: L("Every app's cache folder. Each one is listed separately below.", "תיקיית המטמון של כל אפליקציה. כל אחת מופיעה בנפרד למטה."), next: L("Apps rebuild their caches.", "אפליקציות בונות מחדש את המטמונים."), howTo: L("Move individual app caches below rather than the whole folder.", "העבר מטמוני אפליקציות בודדים למטה ולא את התיקייה כולה."))
         case "system.logs": return LocationText(title: L("Logs", "יומנים"), what: L("Diagnostic logs from apps and the system.", "יומני אבחון של אפליקציות והמערכת."), next: L("New logs are written as needed.", "יומנים חדשים נכתבים לפי הצורך."), howTo: nil)
         case "system.tempFolders": return LocationText(title: L("System temporary folders", "תיקיות זמניות של המערכת"), what: L("Caches and temporary files macOS manages.", "מטמונים וקבצים זמניים ש־macOS מנהל."), next: L("Cleared on restart.", "מתנקה באתחול."), howTo: L("Restart the Mac.", "הפעל מחדש את המק."))
-        case "chrome", "chrome.cache": return LocationText(title: L("Chrome", "Chrome"), what: L("Profiles, extensions and cache.", "פרופילים, תוספים ומטמון."), next: L("Profiles hold logins; only the cache is safe to clear.", "הפרופילים מכילים כניסות; רק המטמון בטוח לניקוי."), howTo: L("Chrome › Clear browsing data › Cached images and files.", "Chrome › Clear browsing data › Cached images and files."))
+        case "chrome.cache": return LocationText(title: L("Chrome cache", "מטמון Chrome"), what: L("Cached pages and images.", "דפים ותמונות שנשמרו."), next: L("Downloaded again as you browse.", "יורדים שוב תוך כדי גלישה."), howTo: L("Chrome › Clear browsing data › Cached images and files.", "Chrome › Clear browsing data › Cached images and files."))
+        case "chrome": return LocationText(title: L("Chrome profiles", "פרופילי Chrome"), what: L("Profiles, extensions and cache.", "פרופילים, תוספים ומטמון."), next: L("Profiles hold logins; only the cache is safe to clear.", "הפרופילים מכילים כניסות; רק המטמון בטוח לניקוי."), howTo: L("Chrome › Clear browsing data › Cached images and files.", "Chrome › Clear browsing data › Cached images and files."))
         case "safari.cache": return LocationText(title: L("Safari cache", "מטמון Safari"), what: L("Cached web content.", "תוכן אינטרנט שנשמר."), next: L("Downloaded again as you browse.", "יורד שוב תוך כדי גלישה."), howTo: L("Safari › Settings › Privacy › Manage Website Data.", "Safari › Settings › Privacy › Manage Website Data."))
         case "whatsapp.media": return LocationText(title: L("WhatsApp media", "מדיה של WhatsApp"), what: L("Photos, videos and files from chats.", "תמונות, סרטונים וקבצים משיחות."), next: L("Not re-downloadable from the Mac; review chat by chat.", "לא ניתן להוריד מחדש מהמק; סקור שיחה־שיחה."), howTo: L("Use the WhatsApp location in the sidebar and the chat filter.", "השתמש במיקום WhatsApp בסרגל הצדדי ובסינון השיחות."))
         case "messages.attachments": return LocationText(title: L("Messages attachments", "קבצים מצורפים של Messages"), what: L("Photos and files from iMessage.", "תמונות וקבצים מ־iMessage."), next: L("Deleting here breaks conversations.", "מחיקה כאן פוגעת בשיחות."), howTo: L("Messages › Settings › General › Keep messages, or delete attachments inside Messages.", "Messages › Settings › General › Keep messages, או מחק קבצים מצורפים בתוך Messages."))
         case "mail": return LocationText(title: L("Mail", "Mail"), what: L("Downloaded mailboxes and attachments.", "תיבות דואר וקבצים מצורפים שהורדו."), next: L("Do not touch the files; Mail rebuilds only from the server.", "אל תיגע בקבצים; Mail משחזר רק מהשרת."), howTo: L("Mail › Settings › Accounts › Download Attachments: Recent or None.", "Mail › Settings › Accounts › Download Attachments: Recent or None."))
         case "iphone.backups": return LocationText(title: L("iPhone and iPad backups", "גיבויי iPhone ו־iPad"), what: L("Full device backups made with Finder.", "גיבויים מלאים של מכשירים שנעשו עם Finder."), next: L("A deleted backup is gone; keep the latest per device.", "גיבוי שנמחק אבוד; שמור את האחרון לכל מכשיר."), howTo: L("Finder › your device › Manage Backups.", "Finder › המכשיר שלך › Manage Backups."))
         case "spotify.cache": return LocationText(title: L("Spotify cache", "מטמון Spotify"), what: L("Streamed music kept for offline playback.", "מוזיקה שהוזרמה ונשמרה לניגון לא מקוון."), next: L("Streams again.", "מוזרמת שוב."), howTo: nil)
-        case "slack.cache", "teams.cache": return LocationText(title: L("Chat app cache", "מטמון אפליקציית צ׳אט"), what: L("Cached messages and images.", "הודעות ותמונות שנשמרו."), next: L("Downloaded again from the service.", "יורדות שוב מהשירות."), howTo: nil)
+        case "slack.cache": return LocationText(title: L("Slack cache", "מטמון Slack"), what: L("Cached messages and images.", "הודעות ותמונות שנשמרו."), next: L("Downloaded again from the service.", "יורדות שוב מהשירות."), howTo: nil)
+        case "teams.cache": return LocationText(title: L("Teams cache", "מטמון Teams"), what: L("Cached messages and images.", "הודעות ותמונות שנשמרו."), next: L("Downloaded again from the service.", "יורדות שוב מהשירות."), howTo: nil)
         case "zoom.data": return LocationText(title: "Zoom", what: L("Recordings and cached data.", "הקלטות ונתונים שנשמרו."), next: L("Local recordings would be lost.", "הקלטות מקומיות יאבדו."), howTo: L("Review recordings inside the folder before moving anything.", "סקור הקלטות בתוך התיקייה לפני כל העברה."))
         case "trash": return LocationText(title: L("Trash", "פח האשפה"), what: L("Everything you moved to Trash, from this app or Finder.", "כל מה שהעברת לפח, מהאפליקציה הזו או מ־Finder."), next: L("Space is only freed when Trash is emptied.", "המקום מתפנה רק כשמרוקנים את הפח."), howTo: L("Finder › Empty Trash, after you are sure.", "Finder › Empty Trash, אחרי שאתה בטוח."))
         default: return LocationText(title: location.id, what: "", next: "", howTo: nil)
@@ -62,7 +66,7 @@ enum LocationTexts {
     }
     static func safetyTitle(_ safety: CleanupSafety) -> String {
         switch safety {
-        case .rebuildable: return L("Safe to move to Trash", "בטוח להעביר לפח")
+        case .rebuildable: return L("Rebuildable · can go to Trash", "נבנה מחדש · יכול ללכת לפח")
         case .cleanInsideApp: return L("Clean from the app itself", "לנקות מתוך האפליקציה עצמה")
         case .commandOnly: return L("Command in Terminal", "פקודה ב־Terminal")
         case .restartClears: return L("Cleared on restart", "מתנקה באתחול")
@@ -123,7 +127,7 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         table.rowHeight = 30; table.intercellSpacing = NSSize(width: 12, height: 4); table.usesAlternatingRowBackgroundColors = false; table.style = .inset
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle; table.allowsMultipleSelection = false
         table.setAccessibilityLabel(L("Free up space", "פינוי מקום"))
-        for (id, title, width) in [("name", L("What", "מה"), 220.0), ("size", L("On disk", "בדיסק"), 76.0), ("safety", L("Verdict", "מסקנה"), 150.0), ("next", L("Next time", "בפעם הבאה"), 170.0)] {
+        for (id, title, width) in [("name", L("Location", "מיקום"), 220.0), ("size", L("On disk", "בדיסק"), 76.0), ("safety", L("Verdict", "המלצה"), 150.0), ("next", L("If removed", "אם יוסר"), 170.0)] {
             let c = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id)); c.title = title; c.width = width; c.minWidth = 56; table.addTableColumn(c)
         }
         let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.documentView = table
@@ -152,7 +156,11 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
     required init?(coder: NSCoder) { nil }
 
     var selectedRow: Row? { table.selectedRow >= 0 && table.selectedRow < rows.count ? rows[table.selectedRow] : nil }
-    var measuredTotal: Int64 { rows.reduce(0) { $0 + ($1.moved ? 0 : ($1.measurement?.bytes ?? 0)) } }
+    /// Rows nested inside another listed row (per-app caches under Library/Caches) are not counted twice.
+    var measuredTotal: Int64 {
+        rows.filter { r in !r.moved && !rows.contains { o in o.location.id != r.location.id && r.location.relativePath.hasPrefix(o.location.relativePath + "/") } }
+            .reduce(0) { $0 + ($1.measurement?.bytes ?? 0) }
+    }
     var rebuildableTotal: Int64 { rows.filter { $0.location.safety == .rebuildable && !$0.moved }.reduce(0) { $0 + ($1.measurement?.bytes ?? 0) } }
     var unmeasured: [KnownLocation] { rows.filter { $0.measurement == nil && !$0.moved }.map(\.location) }
 
@@ -202,7 +210,7 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         let row = rows[index]; let text = LocationTexts.text(for: row.location)
         switch tableColumn?.identifier.rawValue {
         case "size":
-            let v = NSTextField(labelWithString: row.moved ? L("moved", "הועבר") : (row.measurement.map { $0.error == nil ? bytes($0.bytes) + ($0.cancelled ? " ·…" : "") : "?" } ?? "—"))
+            let v = NSTextField(labelWithString: row.moved ? L("moved", "הועבר") : (row.measurement.map { $0.error == nil ? bytes($0.bytes) : "?" } ?? "—"))
             v.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular); v.textColor = .secondaryLabelColor; v.alignment = .right; return v
         case "safety":
             let v = NSTextField(labelWithString: LocationTexts.safetyTitle(row.location.safety)); v.font = .systemFont(ofSize: 11, weight: .semibold); v.textColor = LocationTexts.safetyColor(row.location.safety); v.lineBreakMode = .byTruncatingTail; return v
@@ -221,7 +229,8 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private func updateDetail() {
         guard let row = selectedRow else {
             detailSize.stringValue = ""; detailTitle.stringValue = L("Free up space", "פינוי מקום"); detailSafety.stringValue = ""
-            detailPath.stringValue = ""; detailWhat.stringValue = L("Nothing known found in this home folder.", "לא נמצא כאן דבר מהרשימה המוכרת."); detailNext.stringValue = ""; detailHow.stringValue = ""; detailCommand.isHidden = true; return
+            detailPath.stringValue = ""; detailWhat.stringValue = rows.isEmpty ? L("Nothing from the known list exists in this home folder.", "לא נמצא כאן דבר מהרשימה המוכרת.") : L("Select a location to see what it is and what happens if it is removed.", "בחר מיקום כדי לראות מה הוא ומה קורה אם הוא יוסר.")
+            detailNext.stringValue = ""; detailHow.stringValue = ""; detailHow.isHidden = true; detailCommand.isHidden = true; return
         }
         let text = LocationTexts.text(for: row.location)
         detailSize.stringValue = row.moved ? L("Moved to Trash", "הועבר לפח") : (row.measurement.map { $0.error == nil ? bytes($0.bytes) : L("Not measurable", "לא ניתן למדוד") } ?? L("Not measured yet", "טרם נמדד"))
@@ -229,9 +238,10 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         detailSafety.stringValue = LocationTexts.safetyTitle(row.location.safety); detailSafety.textColor = LocationTexts.safetyColor(row.location.safety)
         detailPath.stringValue = (row.location.url(home: home).path as NSString).abbreviatingWithTildeInPath; detailPath.toolTip = row.location.url(home: home).path
         detailWhat.stringValue = text.what
-        detailNext.stringValue = L("Next time: ", "בפעם הבאה: ") + text.next
+        detailNext.stringValue = L("If removed: ", "אם יוסר: ") + text.next
         if let measurement = row.measurement, let error = measurement.error { detailHow.stringValue = error }
-        else if let how = text.howTo { detailHow.stringValue = how } else { detailHow.stringValue = row.location.safety == .rebuildable ? L("Measure, then Move to Trash. Undo with ⌘Z in this session.", "מדוד, ואז העבר לפח. שחזור עם ⌘Z בהפעלה זו.") : "" }
+        else if let how = text.howTo { detailHow.stringValue = how }
+        else { detailHow.stringValue = row.location.safety == .rebuildable ? L("Measure, then Move to Trash. Undo with ⌘Z in this session.", "מדוד, ואז העבר לפח. שחזור עם ⌘Z בהפעלה זו.") : (row.location.safety == .commandOnly ? L("Copy the command and run it in Terminal yourself. The app never runs commands, and the tool deletes immediately, without Trash or Undo.", "העתק את הפקודה והרץ אותה בעצמך ב־Terminal. האפליקציה לעולם לא מריצה פקודות, והכלי מוחק מיד, בלי פח ובלי שחזור.") : "") }
         detailHow.isHidden = detailHow.stringValue.isEmpty
         detailCommand.stringValue = row.location.command.map { "  " + $0 + "  " } ?? ""; detailCommand.isHidden = row.location.command == nil
     }

@@ -3,9 +3,9 @@ import Quartz
 import AVKit
 import ImageIO
 import SQLite3
-import KeepelixCore
+import AvakashaCore
 
-/// Interface language. English by default; Hebrew is an explicit choice in Keepelix › Language and applies on the next launch.
+/// Interface language. English by default; Hebrew is an explicit choice in Avakasha › Language and applies on the next launch.
 enum AppLanguage { static var current = "en"; static let supported = [("en", "English"), ("he", "עברית")] }
 func L(_ en: String, _ he: String) -> String { AppLanguage.current == "he" ? he : en }
 func bytes(_ n: Int64) -> String { ByteCountFormatter.string(fromByteCount: n, countStyle: .file) }
@@ -39,9 +39,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     let demoMode = ProcessInfo.processInfo.arguments.contains("--demo") || ProcessInfo.processInfo.arguments.contains("--demo-map")
     var demoFolder: URL?
     let preferences: UserDefaults = {
-        if ProcessInfo.processInfo.arguments.contains("--demo") || ProcessInfo.processInfo.arguments.contains("--demo-map") { return UserDefaults(suiteName:"Keepelix.SyntheticDemo")! }
+        if ProcessInfo.processInfo.arguments.contains("--demo") || ProcessInfo.processInfo.arguments.contains("--demo-map") { return UserDefaults(suiteName:"Avakasha.SyntheticDemo")! }
         if ProcessInfo.processInfo.arguments.contains("--smoke-test") {
-            guard let isolated = UserDefaults(suiteName:"Keepelix.SyntheticSmoke") else { fatalError("Cannot create synthetic test preferences") }
+            guard let isolated = UserDefaults(suiteName:"Avakasha.SyntheticSmoke") else { fatalError("Cannot create synthetic test preferences") }
             return isolated
         }
         // A suite matching the app bundle identifier may return nil. Use the native app domain.
@@ -112,7 +112,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     var similar: [DuplicateGroup] = []
     var guards: [String: FileRecord] = [:]
     var token = CancellationToken()
-    let work = DispatchQueue(label: "Keepelix.background", qos: .userInitiated)
+    let work = DispatchQueue(label: "Avakasha.background", qos: .userInitiated)
     var busy = false
     var previewOpen = true // the preview pane is open by default; Space plays or pauses a video, otherwise toggles the preview
     var contextRow = -1
@@ -129,7 +129,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     /// "Free up space": known caches and app data explained one by one, measured on request.
     var freeUpMode = false
     let freeUpPanel = FreeUpPanel()
-    var home: URL { FileManager.default.homeDirectoryForCurrentUser }
+    /// The home folder the Free up space screen works on. A stored value so the hidden smoke can point it at a synthetic home.
+    var home: URL = FileManager.default.homeDirectoryForCurrentUser
     var previewHostView: NSView!
     let mapPanel = StorageMapPanel()
     var mapRoot: URL?
@@ -148,7 +149,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         window = NSWindow(contentRect:NSRect(x:0,y:0,width:1320,height:820),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
-        window.delegate=self; window.title="Keepelix · 0.1.0 beta 9"
+        window.delegate=self; window.title="Avakasha · 0.1.0 beta 9"
         window.minSize=NSSize(width:1120,height:720);window.center();window.titlebarAppearsTransparent=true
         func label(_ text:String,_ size:CGFloat,_ weight:NSFont.Weight = .regular,_ secondary:Bool = false)->NSTextField {
             let v=NSTextField(labelWithString:text);v.font = .systemFont(ofSize:size,weight:weight);v.textColor=secondary ? .secondaryLabelColor : .labelColor;return v
@@ -164,11 +165,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         func divider()->NSBox {let v=NSBox();v.boxType = .separator;return v}
         let brandIcon=NSImageView(image:NSImage(systemSymbolName:"square.stack.3d.up.fill",accessibilityDescription:nil)!);brandIcon.contentTintColor = .controlAccentColor
         brandIcon.widthAnchor.constraint(equalToConstant:26).isActive=true;brandIcon.heightAnchor.constraint(equalToConstant:26).isActive=true
-        let brand=row([brandIcon,label("Keepelix",21,.semibold)],10)
+        let brand=row([brandIcon,label("Avakasha",21,.semibold)],10)
         let choose=button("Other folder or drive…","תיקייה אחרת או כונן…","folder.badge.plus",#selector(chooseFolder))
         let presets=[("WhatsApp","ווטסאפ","message.fill"),("Downloads","הורדות","arrow.down.circle.fill"),("Movies","סרטים","film.fill"),("Pictures","תמונות","photo.fill"),("Documents","מסמכים","doc.text.fill"),("Desktop","שולחן העבודה","desktopcomputer")]
         for (index,p) in presets.enumerated() {
-            let b=button(p.0,p.1,p.2,#selector(chooseLocation(_:)));b.tag=index;b.isBordered=false;b.alignment = .left;b.imageHugsTitle=true
+            let b=button(p.0,p.1,p.2,#selector(chooseLocation(_:)));b.tag=index;b.isBordered=false;b.alignment = .natural;b.imageHugsTitle=true
             b.contentTintColor = .labelColor;b.font = .systemFont(ofSize:14,weight:.medium)
             b.heightAnchor.constraint(equalToConstant:38).isActive=true
             b.toolTip=L("Click to scan this folder. Scanning never deletes files.","לחץ לסריקת התיקייה. הסריקה לא מוחקת קבצים.");locationButtons.append(b)
@@ -176,15 +177,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let locationList=column(locationButtons,4)
         let sidebarSpacer=NSView();sidebarSpacer.setContentHuggingPriority(.init(1),for:.vertical)
         let privacy=label(L("Local. Private. Yours.","מקומי. פרטי. שלך."),13,.medium)
-        let overviewEntry=button("Overview","סקירה כללית","house.fill",#selector(showOverview));overviewEntry.isBordered=false;overviewEntry.alignment = .left;overviewEntry.font = .systemFont(ofSize:14,weight:.medium);sidebarOverview=overviewEntry
+        let overviewEntry=button("Overview","סקירה כללית","house.fill",#selector(showOverview));overviewEntry.isBordered=false;overviewEntry.alignment = .natural;overviewEntry.font = .systemFont(ofSize:14,weight:.medium);sidebarOverview=overviewEntry
         overviewEntry.toolTip=L("Disks, this session and where to start.","כוננים, ההפעלה הזו ומאיפה להתחיל.")
-        let olderButton=button("Older files","קבצים ישנים","clock",#selector(showOlderFiles));olderButton.isBordered=false;olderButton.alignment = .left;olderButton.font = .systemFont(ofSize:14,weight:.medium);sidebarOlder=olderButton
-        let installersButton=button("Installers","קבצי התקנה","shippingbox",#selector(showInstallers));installersButton.isBordered=false;installersButton.alignment = .left;installersButton.font = .systemFont(ofSize:14,weight:.medium);sidebarInstallers=installersButton
+        let olderButton=button("Older files","קבצים ישנים","clock",#selector(showOlderFiles));olderButton.isBordered=false;olderButton.alignment = .natural;olderButton.font = .systemFont(ofSize:14,weight:.medium);sidebarOlder=olderButton
+        let installersButton=button("Installers","קבצי התקנה","shippingbox",#selector(showInstallers));installersButton.isBordered=false;installersButton.alignment = .natural;installersButton.font = .systemFont(ofSize:14,weight:.medium);sidebarInstallers=installersButton
         installersButton.toolTip=L("Disk images, installer packages and archives in this location that have not changed for a while. Nothing is deleted.","תמונות דיסק, חבילות התקנה וארכיונים במיקום הזה שלא השתנו זמן רב. שום דבר לא נמחק.")
-        let openBin=button("Trash","פח האשפה","trash",#selector(openTrash));openBin.isBordered=false;openBin.alignment = .left;openBin.font = .systemFont(ofSize:14,weight:.medium)
+        let openBin=button("Trash","פח האשפה","trash",#selector(openTrash));openBin.isBordered=false;openBin.alignment = .natural;openBin.font = .systemFont(ofSize:14,weight:.medium)
         let freeUpEntry=button("Free up space","פינוי מקום","sparkles",#selector(showFreeUp));freeUpEntry.isBordered=false;freeUpEntry.alignment = .natural;freeUpEntry.font = .systemFont(ofSize:14,weight:.medium);sidebarFreeUp=freeUpEntry
         freeUpEntry.toolTip=L("Caches and app data that fill System Data, explained one by one. Measured only when you ask.","מטמונים ונתוני אפליקציות שממלאים את System Data, מוסברים אחד־אחד. נמדדים רק כשתבקש.")
-        let mapEntry=button("Storage map…","מפת אחסון…","chart.pie.fill",#selector(chooseMapFolder));mapEntry.isBordered=false;mapEntry.alignment = .left;mapEntry.font = .systemFont(ofSize:14,weight:.medium);sidebarMap=mapEntry
+        let mapEntry=button("Storage map…","מפת אחסון…","chart.pie.fill",#selector(chooseMapFolder));mapEntry.isBordered=false;mapEntry.alignment = .natural;mapEntry.font = .systemFont(ofSize:14,weight:.medium);sidebarMap=mapEntry
         mapEntry.toolTip=L("See which folders fill a folder or drive. Nothing is deleted.","ראה אילו תיקיות ממלאות תיקייה או כונן. שום דבר לא נמחק.")
         let sidebarContent=column([brand,overviewEntry,label(L("LOCATIONS","מיקומים"),10,.semibold,true),locationList,choose,divider(),mapEntry,freeUpEntry,olderButton,installersButton,openBin,sidebarSpacer,privacy],18)
         let sidebar=NSVisualEffectView();sidebar.material = .sidebar;sidebar.blendingMode = .behindWindow;sidebar.state = .followsWindowActiveState
@@ -227,7 +228,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let analysis=row([mode,groupPicker,agePicker,starFilter,chatNamesButton,autoDownloadButton,spacer(),exactButton,similarButton])
         scroll=NSScrollView();scroll.hasVerticalScroller=true;scroll.hasHorizontalScroller=true;scroll.autohidesScrollers=true
         table.frame=NSRect(x:0,y:0,width:540,height:440);table.autoresizingMask=[.width];table.owner=self;table.delegate=self;table.dataSource=self
-        table.setDraggingSourceOperationMask(.copy,forLocal:false) // dragging out copies; Keepelix never moves files without confirmation
+        table.setDraggingSourceOperationMask(.copy,forLocal:false) // dragging out copies; Avakasha never moves files without confirmation
         table.allowsMultipleSelection=true;table.rowHeight=38;table.intercellSpacing=NSSize(width:12,height:4);table.usesAlternatingRowBackgroundColors=false;table.style = .inset;table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         for (id,title,width) in [("star","★",24.0),("name",L("Name","שם"),240.0),("size",L("On disk","בדיסק"),80.0),("modified",L("Last modified","שינוי אחרון"),100.0)] {
             let c=NSTableColumn(identifier:NSUserInterfaceItemIdentifier(id));c.title=title;c.width=width;table.addTableColumn(c)
@@ -236,7 +237,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         scroll.documentView=table
         primary=QLPreviewView(frame:NSRect(x:0,y:0,width:330,height:440),style:.normal);primary.autostarts=false
         comparison=QLPreviewView(frame:NSRect(x:0,y:0,width:330,height:440),style:.normal);comparison.autostarts=false
-        // AVKit hides its own controls when the pointer leaves the video, so the transport bar below is drawn by Keepelix and always visible.
+        // AVKit hides its own controls when the pointer leaves the video, so the transport bar below is drawn by Avakasha and always visible.
         videoPlayer=AVPlayerView(frame:NSRect(x:0,y:0,width:330,height:400));videoPlayer.controlsStyle = .none;videoPlayer.setAccessibilityLabel(L("Video","וידאו"))
         for (b,symbol,action,labelEn,labelHe) in [(playButton,"play.fill",#selector(togglePlayback),"Play","נגן"),(muteButton,"speaker.wave.2.fill",#selector(toggleMute),"Mute","השתק")] {
             b.bezelStyle = .rounded;b.image=NSImage(systemSymbolName:symbol,accessibilityDescription:L(labelEn,labelHe));b.imagePosition = .imageOnly;b.title="";b.target=self;b.action=action;b.setAccessibilityLabel(L(labelEn,labelHe))
@@ -275,7 +276,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         NSLayoutConstraint.activate([overviewPanel.leadingAnchor.constraint(equalTo:listHost.leadingAnchor),overviewPanel.trailingAnchor.constraint(equalTo:listHost.trailingAnchor),overviewPanel.topAnchor.constraint(equalTo:listHost.topAnchor),overviewPanel.bottomAnchor.constraint(equalTo:listHost.bottomAnchor)])
         overviewPanel.onMapHome={[weak self] in self?.startMap(FileManager.default.homeDirectoryForCurrentUser)}
         overviewPanel.onMapDrive={[weak self] in self?.chooseMapFolder()}
-        overviewPanel.onOpenTrash={[weak self] in self?.openTrash()}
+        overviewPanel.onFreeUp={[weak self] in self?.showFreeUp()}
         previewHostView=previewHost
         mapPanel.onTrashFolder={[weak self] node in self?.trashFolderFromMap(node)}
         freeUpPanel.translatesAutoresizingMaskIntoConstraints=false;listHost.addSubview(freeUpPanel,positioned:.below,relativeTo:emptyList);freeUpPanel.isHidden=true
@@ -345,8 +346,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         window.makeKeyAndOrderFront(nil);window.makeFirstResponder(table);NSApp.activate(ignoringOtherApps:true)
     }
     func prepareDemo() {
-        window.title="Keepelix · Read-only demo";window.setContentSize(NSSize(width:1190,height:768));window.center()
-        let container=FileManager.default.temporaryDirectory.appendingPathComponent("Keepelix-Demo-"+UUID().uuidString,isDirectory:true)
+        window.title="Avakasha · Read-only demo";window.setContentSize(NSSize(width:1190,height:768));window.center()
+        let container=FileManager.default.temporaryDirectory.appendingPathComponent("Avakasha-Demo-"+UUID().uuidString,isDirectory:true)
         let folder=container.appendingPathComponent(L("Example collection","אוסף לדוגמה"),isDirectory:true)
         do {
             try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true);demoFolder=container
@@ -386,12 +387,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let writer=try AVAssetWriter(outputURL:url,fileType:.mov)
         let input=AVAssetWriterInput(mediaType:.video,outputSettings:[AVVideoCodecKey:AVVideoCodecType.h264,AVVideoWidthKey:width,AVVideoHeightKey:height])
         let adaptor=AVAssetWriterInputPixelBufferAdaptor(assetWriterInput:input,sourcePixelBufferAttributes:[kCVPixelBufferPixelFormatTypeKey as String:kCVPixelFormatType_32ARGB,kCVPixelBufferWidthKey as String:width,kCVPixelBufferHeightKey as String:height])
-        writer.add(input);guard writer.startWriting() else { throw writer.error ?? NSError(domain:"Keepelix",code:4) }
+        writer.add(input);guard writer.startWriting() else { throw writer.error ?? NSError(domain:"Avakasha",code:4) }
         writer.startSession(atSourceTime:.zero)
         for frame in 0..<frames {
             while !input.isReadyForMoreMediaData { Thread.sleep(forTimeInterval:0.01) }
             var buffer:CVPixelBuffer?
-            guard let pool=adaptor.pixelBufferPool, CVPixelBufferPoolCreatePixelBuffer(nil,pool,&buffer) == kCVReturnSuccess, let pixels=buffer else { throw NSError(domain:"Keepelix",code:5) }
+            guard let pool=adaptor.pixelBufferPool, CVPixelBufferPoolCreatePixelBuffer(nil,pool,&buffer) == kCVReturnSuccess, let pixels=buffer else { throw NSError(domain:"Avakasha",code:5) }
             CVPixelBufferLockBaseAddress(pixels,[])
             if let context=CGContext(data:CVPixelBufferGetBaseAddress(pixels),width:width,height:height,bitsPerComponent:8,bytesPerRow:CVPixelBufferGetBytesPerRow(pixels),space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.noneSkipFirst.rawValue) {
                 let shift=CGFloat(frame)/CGFloat(frames)
@@ -405,15 +406,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             adaptor.append(pixels,withPresentationTime:CMTime(value:CMTimeValue(frame),timescale:24))
         }
         input.markAsFinished();let done=DispatchSemaphore(value:0);writer.finishWriting{done.signal()};done.wait()
-        if writer.status != .completed { throw writer.error ?? NSError(domain:"Keepelix",code:6) }
+        if writer.status != .completed { throw writer.error ?? NSError(domain:"Avakasha",code:6) }
     }
     func applicationWillTerminate(_ notification:Notification) {
-        if let demoFolder=demoFolder {try? FileManager.default.removeItem(at:demoFolder);preferences.removePersistentDomain(forName:"Keepelix.SyntheticDemo")}
+        if let demoFolder=demoFolder {try? FileManager.default.removeItem(at:demoFolder);preferences.removePersistentDomain(forName:"Avakasha.SyntheticDemo")}
     }
     func makeMenus() {
         let main = NSMenu(); let app = NSMenuItem(); main.addItem(app); let menu = NSMenu(); app.submenu = menu
-        let about = NSMenuItem(title: L("About Keepelix", "אודות Keepelix"), action: #selector(aboutApp), keyEquivalent: ""); about.target = self; menu.addItem(about)
-        menu.addItem(withTitle: L("Quit Keepelix","סגור Keepelix"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let about = NSMenuItem(title: L("About Avakasha", "אודות Avakasha"), action: #selector(aboutApp), keyEquivalent: ""); about.target = self; menu.addItem(about)
+        menu.addItem(withTitle: L("Quit Avakasha","סגור Avakasha"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         let edit = NSMenuItem(); edit.title = L("Edit","עריכה"); main.addItem(edit); edit.submenu = NSMenu(title:L("Edit","עריכה"))
         for (title,selector,key) in [(L("Select all","בחר הכול"),#selector(selectAllCommand),"a"),(L("Undo","שחזר"),#selector(undoCommand),"z")] {
             let item = NSMenuItem(title:title,action:selector,keyEquivalent:key); item.target=self; edit.submenu!.addItem(item)
@@ -443,7 +444,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         sender.menu?.items.forEach{$0.state = ($0.representedObject as? String) == code ? .on : .off}
         guard code != AppLanguage.current, !smokeMode else { return }
         let hebrew = code == "he"
-        let a=NSAlert();a.messageText = hebrew ? "Keepelix תוצג בעברית בפתיחה הבאה" : "Keepelix will open in English next time"
+        let a=NSAlert();a.messageText = hebrew ? "Avakasha תוצג בעברית בפתיחה הבאה" : "Avakasha will open in English next time"
         a.informativeText = hebrew ? "הפעל מחדש כדי להחיל את השפה וכיוון הממשק. פעולה שרצה כרגע צריכה להסתיים קודם." : "Relaunch to apply the language and layout direction. A running operation must finish first."
         a.addButton(withTitle: hebrew ? "הפעל מחדש עכשיו" : "Relaunch now");a.addButton(withTitle: hebrew ? "אחר כך" : "Later")
         if a.runModal() == .alertFirstButtonReturn { relaunch() }
@@ -468,11 +469,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         }
         if item.action == #selector(redoCommand) {
             if let editor=window.firstResponder as? NSTextView {return editor.undoManager?.canRedo ?? false}
-            return !busy && !demoMode && !overviewMode && activeHistory.canRedo
+            return !busy && !demoMode && !overviewMode && !mapMode && !freeUpMode && history.canRedo
         }
         return true
     }
-    @objc func aboutApp() { show(L("Keepelix 0.1.0 beta 9", "Keepelix 0.1.0 בטא 9"), "© 2026 Daniel Siman Tov\n" + L("Contact: ","יצירת קשר: ") + "daniel.simisi@gmail.com\n\n" + L("Offline file review. MIT license. Not affiliated with WhatsApp or Meta. Undo is available for this app session; Finder Trash remains available afterward.","סקירת קבצים מקומית. רישיון MIT. ללא שיוך ל־WhatsApp או Meta. שחזור באפליקציה זמין במהלך ההפעלה הנוכחית; הפח של Finder נשאר זמין לאחר מכן.")) }
+    @objc func aboutApp() { show(L("Avakasha 0.1.0 beta 9", "Avakasha 0.1.0 בטא 9"), "© 2026 Daniel Siman Tov\n" + L("Contact: ","יצירת קשר: ") + "daniel.simisi@gmail.com\n\n" + L("Offline file review. MIT license. Not affiliated with WhatsApp or Meta. Undo is available for this app session; Finder Trash remains available afterward.","סקירת קבצים מקומית. רישיון MIT. ללא שיוך ל־WhatsApp או Meta. שחזור באפליקציה זמין במהלך ההפעלה הנוכחית; הפח של Finder נשאר זמין לאחר מכן.")) }
     func show(_ title: String, _ detail: String) {
         if smokeMode { print("Alert suppressed in smoke mode: \(title) — \(detail)"); return }
         let a=NSAlert();a.messageText=title;a.informativeText=detail;a.runModal()
@@ -543,7 +544,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     /// Measures known locations one by one on the work queue; cancel keeps what was measured so far.
     func measureLocations(_ locations:[KnownLocation]) {
         guard !busy, !locations.isEmpty else { return }
-        token=CancellationToken();let jobToken=token;let base=home;setBusy(true)
+        token=CancellationToken();let jobToken=token;let base=freeUpPanel.home;setBusy(true)
         work.async {
             var done=0
             for location in locations {
@@ -564,9 +565,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     /// Whole-folder move for a known, rebuildable location: same guarded flow as the map, with the home folder as the safety root.
     func trashLocation(_ location:KnownLocation,measured:LocationMeasurement,confirmed:Bool=false) {
-        guard !busy, location.safety == .rebuildable, let base=try? FileSafety.root(home) else { return }
+        guard !busy, location.safety == .rebuildable, let base=try? FileSafety.root(freeUpPanel.home) else { return }
         let text=LocationTexts.text(for:location)
-        trashFolder(location.url(home:base),root:base,title:text.title,explanation:text.what+"\n"+L("Next time: ","בפעם הבאה: ")+text.next,confirmed:confirmed) { [weak self] in
+        trashFolder(location.url(home:base),root:base,title:text.title,explanation:text.what+"\n"+L("If removed: ","אם יוסר: ")+text.next,confirmed:confirmed,fromCatalogue:true) { [weak self] in
             self?.freeUpPanel.markMoved(location)
         }
     }
@@ -576,14 +577,37 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         trashFolder(node.url,root:target,title:node.name,explanation:nil,confirmed:confirmed) { [weak self] in
             guard let self=self else { return }
             self.mapPanel.remove(node);self.mapStale=true;self.mapPanel.setStale(true)
-            let prefix=node.url.path+"/";self.files.removeAll{ $0.id.hasPrefix(prefix) };if !self.mapMode { self.applyFilters() }
+            let prefix=node.url.path+"/";if self.files.contains(where:{ $0.id.hasPrefix(prefix) }) { self.files.removeAll{ $0.id.hasPrefix(prefix) };self.exact=[];self.similar=[];self.guards=[:] };if !self.mapMode { self.applyFilters() }
         }
     }
     /// The one path every whole-folder move takes: check, measure again, confirm with fresh numbers, move with identity checks, record for Undo.
-    func trashFolder(_ folder:URL,root:URL,title:String,explanation:String?,confirmed:Bool,onMoved:@escaping ()->Void) {
+    /// Wording for the core's folder refusals, in the interface language.
+    func folderErrorText(_ error:Error) -> String {
+        switch error as? TriageError {
+        case .unsafePath?: return L("The folder is outside the chosen root, or is a link.","התיקייה נמצאת מחוץ לתיקיית הבסיס, או שהיא קישור.")
+        case .changed?: return L("The folder changed since it was measured. Measure it again before moving it.","התיקייה השתנתה מאז שנמדדה. מדוד אותה שוב לפני ההעברה.")
+        case .folderProtected?: return L("Bundles, hidden folders, folders under hidden folders, the home folder and system folders are never moved as a whole. Review the files inside instead.","חבילות, תיקיות מוסתרות, תיקיות תחת תיקיות מוסתרות, תיקיית הבית ותיקיות מערכת לעולם לא מועברות בשלמותן. סקור את הקבצים שבפנים במקום.")
+        case .notLocal?: return L("The folder is on another volume or not downloaded.","התיקייה נמצאת בכונן אחר או שלא הורדה.")
+        default: return error.localizedDescription
+        }
+    }
+    /// The always-on confirmation for a whole-folder move: fresh numbers, path, Cancel as the default button.
+    func makeFolderTrashAlert(title:String,fresh:StorageMapResult,folder:URL,explanation:String?) -> NSAlert {
+        let a=NSAlert();a.alertStyle = .critical;a.messageText=L("Move the folder “","להעביר את התיקייה ״")+title+L("” to Trash?","״ לפח?")
+        var lines=[bytes(fresh.root.bytes)+" · \(fresh.root.files) "+L("files","קבצים")+" · \(fresh.root.directories) "+L("folders","תיקיות"),(folder.path as NSString).abbreviatingWithTildeInPath]
+        if let explanation=explanation { lines.append(explanation) }
+        lines.append(L("Everything inside goes to Trash as one item. Undo with ⌘Z in this session.","כל מה שבפנים עובר לפח כפריט אחד. אפשר לשחזר עם ⌘Z בהפעלה הזו."))
+        a.informativeText=lines.joined(separator:"\n")
+        let move=a.addButton(withTitle:L("Move to Trash","העבר לפח"));let cancel=a.addButton(withTitle:L("Cancel","בטל"))
+        move.keyEquivalent="";cancel.keyEquivalent="\r";move.hasDestructiveAction=true // Return cancels; moving needs a deliberate click
+        return a
+    }
+    /// Test hook: nil asks the user, true or false answers the folder confirmation without a dialog.
+    var folderConfirmationOverride: Bool?
+    func trashFolder(_ folder:URL,root:URL,title:String,explanation:String?,confirmed:Bool,fromCatalogue:Bool=false,onMoved:@escaping ()->Void) {
         guard !busy,!demoMode else { return }
         let expected:FolderIdentity
-        do { expected=try FolderTrash.check(folder,root:root) } catch { show(L("This folder cannot be moved as a whole","לא ניתן להעביר את התיקייה הזו בשלמותה"),error.localizedDescription);return }
+        do { expected=try FolderTrash.check(folder,root:root,allowHiddenAncestors:fromCatalogue) } catch { show(L("This folder cannot be moved as a whole","לא ניתן להעביר את התיקייה הזו בשלמותה"),folderErrorText(error));status.stringValue=L("Nothing moved","שום דבר לא הועבר");return }
         token=CancellationToken();let jobToken=token;setBusy(true);status.stringValue=L("Measuring ","מודד ")+title+"…"
         work.async {
             let fresh=try? StorageMapper.map(root:folder,token:jobToken,limit:0)
@@ -591,20 +615,19 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
                 self.setBusy(false)
                 guard let fresh=fresh, !fresh.cancelled else { self.status.stringValue=L("Stopped · nothing moved","נעצר · שום דבר לא הועבר");return }
                 if fresh.root.hasCaveats { self.show(L("Not moved","לא הועבר"),L("The folder holds items that could not be measured (not accessible, not downloaded, or on another volume). Review its files instead.","התיקייה מכילה פריטים שלא ניתן היה למדוד (לא נגישים, לא הורדו, או בכונן אחר). סקור את הקבצים שלה במקום.")); return }
-                if !confirmed && !self.smokeMode {
-                    let a=NSAlert();a.alertStyle = .critical;a.messageText=L("Move the folder “","להעביר את התיקייה ״")+title+L("” to Trash?","״ לפח?")
-                    var lines=[bytes(fresh.root.bytes)+" · \(fresh.root.files) "+L("files","קבצים")+" · \(fresh.root.directories) "+L("folders","תיקיות"),(folder.path as NSString).abbreviatingWithTildeInPath]
-                    if let explanation=explanation { lines.append(explanation) }
-                    lines.append(L("Everything inside goes to Trash as one item. Undo with ⌘Z in this session; Redo is not available for folders.","כל מה שבפנים עובר לפח כפריט אחד. שחזור עם ⌘Z בהפעלה זו; Redo לא זמין לתיקיות."))
-                    a.informativeText=lines.joined(separator:"\n");a.addButton(withTitle:L("Move to Trash","העבר לפח"));a.addButton(withTitle:L("Cancel","בטל"))
-                    guard a.runModal() == .alertFirstButtonReturn else { self.status.stringValue=L("Nothing moved","שום דבר לא הועבר");return }
+                if !confirmed {
+                    let approved: Bool
+                    if let override=self.folderConfirmationOverride { approved=override }
+                    else if self.smokeMode { approved=true }
+                    else { approved = self.makeFolderTrashAlert(title:title,fresh:fresh,folder:folder,explanation:explanation).runModal() == .alertFirstButtonReturn }
+                    guard approved else { self.status.stringValue=L("Nothing moved","שום דבר לא הועבר");return }
                 }
                 let acting=self.historyFor(root);self.setBusy(true,cancellable:false)
                 self.work.async {
-                    let result=acting.moveFolder(folder,root:root,expected:expected,bytes:fresh.root.bytes,backend:self.trashBackend)
+                    let result=acting.moveFolder(folder,root:root,expected:expected,bytes:fresh.root.bytes,allowHiddenAncestors:fromCatalogue,backend:self.trashBackend)
                     DispatchQueue.main.async {
                         self.setBusy(false)
-                        if result.ticket != nil { onMoved();self.status.stringValue=title+" · "+L("moved to Trash","הועבר לפח")+" · "+bytes(fresh.root.bytes);self.updateSpaceLabel();self.updateEnabled() }
+                        if result.ticket != nil { onMoved();self.status.stringValue=title+" · "+L("moved to Trash · Undo with ⌘Z","הועבר לפח · שחזור עם ⌘Z")+" · "+bytes(fresh.root.bytes);self.updateSpaceLabel();self.updateEnabled() }
                         else if let failure=result.failure { self.show(L("Not moved","לא הועבר"),failure.message) }
                     }
                 }
@@ -684,7 +707,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         }; cancelButton?.isEnabled = busy && cancellable && !token.isCancelled
         [sizeFilter,kindFilter,mode,groupPicker,agePicker,sortPicker,chatFilter].forEach{$0.isEnabled = !busy};search.isEnabled = !busy;chatNamesButton?.isEnabled = !busy
         undoButton?.isEnabled = !busy && !demoMode && !overviewMode && activeHistory.canUndo
-        redoButton?.isEnabled = !busy && !demoMode && !overviewMode && activeHistory.canRedo
+        redoButton?.isEnabled = !busy && !demoMode && !overviewMode && !mapMode && !freeUpMode && history.canRedo
         if !busy { retryButton?.isHidden = activeHistory.blockedCount == 0 } // history is only touched by the work queue while busy
         freeUpPanel.setEnabled(!busy)
         mapPanel.setEnabled(!busy)
@@ -715,7 +738,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     /// Two honest numbers side by side: what was moved (still in Trash) and what the volume reports free. Never a prediction.
     func updateSpaceLabel() {
-        guard let anchor=root ?? mapRoot else { spaceLabel.isHidden=true;return }
+        guard let anchor = freeUpMode ? freeUpPanel.home : (root ?? mapRoot) else { spaceLabel.isHidden=true;return }
         var text = totalMovedBytes > 0 ? L("Moved to Trash this session: ","הועבר לפח בהפעלה זו: ")+bytes(totalMovedBytes) : L("Nothing moved to Trash yet","עדיין לא הועבר דבר לפח")
         if let free=DiskSpace.available(at:anchor) { text += " · "+L("Free on this volume: ","פנוי בכונן הזה: ")+bytes(free) }
         spaceLabel.stringValue=text;spaceLabel.isHidden=false
@@ -928,7 +951,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         guard let database=database else { return }
         if !confirmed && !smokeMode {
             let a=NSAlert();a.messageText=L("Show chat names?","להציג שמות שיחות?")
-            a.informativeText=L("Keepelix will open WhatsApp's local chat list read-only and read only each chat's identifier, display name and type, to label folders. Messages, contacts and media references are not read. Nothing is stored or sent anywhere. Close WhatsApp first if it reports the list as busy.","Keepelix תפתח את רשימת השיחות המקומית של ווטסאפ לקריאה בלבד ותקרא רק מזהה, שם תצוגה וסוג של כל שיחה, כדי לתייג תיקיות. הודעות, אנשי קשר והפניות למדיה לא נקראים. שום דבר לא נשמר ולא נשלח. אם הרשימה מדווחת כתפוסה, סגור את ווטסאפ קודם.")
+            a.informativeText=L("Avakasha will open WhatsApp's local chat list read-only and read only each chat's identifier, display name and type, to label folders. Messages, contacts and media references are not read. Nothing is stored or sent anywhere. Close WhatsApp first if it reports the list as busy.","Avakasha תפתח את רשימת השיחות המקומית של ווטסאפ לקריאה בלבד ותקרא רק מזהה, שם תצוגה וסוג של כל שיחה, כדי לתייג תיקיות. הודעות, אנשי קשר והפניות למדיה לא נקראים. שום דבר לא נשמר ולא נשלח. אם הרשימה מדווחת כתפוסה, סגור את ווטסאפ קודם.")
             a.addButton(withTitle:L("Show names","הצג שמות"));a.addButton(withTitle:L("Cancel","בטל"))
             guard a.runModal() == .alertFirstButtonReturn else { return }
         }
@@ -1285,8 +1308,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         }
     }
     func runSmokeTests() {
-        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("keepelix-smoke-" + UUID().uuidString)
-        func cleanup() { try? FileManager.default.removeItem(at: temp); preferences.removePersistentDomain(forName:"Keepelix.SyntheticSmoke") }
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent("avakasha-smoke-" + UUID().uuidString)
+        func cleanup() { try? FileManager.default.removeItem(at: temp); preferences.removePersistentDomain(forName:"Avakasha.SyntheticSmoke") }
         do {
             try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
             struct FixtureTrash: TrashBackend {
@@ -1532,29 +1555,55 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             mapPanel.table.selectRowIndexes(IndexSet(integer:mapPanel.rows.firstIndex{$0.title == "Small"}!),byExtendingSelection:false)
             precondition(mapPanel.trashableFolder?.name == "Small" && mapPanel.trashButton.isEnabled)
             let smallURL=mapFolder.appendingPathComponent("Small");let mapBytesBefore=mapPanel.result!.root.bytes
+            let folderAlert=makeFolderTrashAlert(title:"Small",fresh:try StorageMapper.map(root:smallURL,token:CancellationToken(),limit:0),folder:smallURL,explanation:nil)
+            precondition(folderAlert.alertStyle == .critical && folderAlert.buttons.count == 2 && folderAlert.buttons[1].keyEquivalent == "\r" && folderAlert.buttons[0].keyEquivalent.isEmpty,"Folder confirmation is critical and Return cancels")
+            preferences.set(true,forKey:"skipTrashConfirmation");folderConfirmationOverride=false
+            let mapDeleteKey=NSEvent.keyEvent(with:.keyDown,location:.zero,modifierFlags:[],timestamp:0,windowNumber:window.windowNumber,context:nil,characters:"",charactersIgnoringModifiers:"",isARepeat:false,keyCode:51)!
+            mapPanel.table.keyDown(with:mapDeleteKey);settle();precondition(FileManager.default.fileExists(atPath:smallURL.path) && status.stringValue == L("Nothing moved","שום דבר לא הועבר"),"A declined confirmation moves nothing, even with file confirmations suppressed")
+            folderConfirmationOverride=nil
             trashFolderFromMap(mapPanel.trashableFolder!,confirmed:true);settle();settle()
             precondition(!FileManager.default.fileExists(atPath:smallURL.path) && !mapPanel.rows.contains{$0.title == "Small"} && mapPanel.result!.root.bytes < mapBytesBefore && mapStale,"Folder moved and detached from the map")
             precondition(activeHistory.canUndo && !activeHistory.canRedo && undoButton.isEnabled,"Folder moves are undoable from the map")
             undoTrash();settle();precondition(FileManager.default.fileExists(atPath:smallURL.appendingPathComponent("tiny.txt").path) && !activeHistory.canRedo,"Undo brings the folder back; no redo for folders")
-            try FileManager.default.createDirectory(at:mapFolder.appendingPathComponent(".hiddencache"),withIntermediateDirectories:true);try Data("h".utf8).write(to:mapFolder.appendingPathComponent(".hiddencache/x"))
-            startMap(mapFolder);settle();mapPanel.table.selectRowIndexes(IndexSet(integer:mapPanel.rows.firstIndex{$0.title == ".hiddencache"}!),byExtendingSelection:false)
-            precondition(mapPanel.trashableFolder == nil && !mapPanel.trashButton.isEnabled,"Hidden folders cannot be moved whole")
+            // Blocked folder restore: something new at the original path waits under Retry; retry succeeds once it is gone.
+            startMap(mapFolder);settle();precondition(mapPanel.rows.contains{$0.title == "Small"},"Rescan lists the restored folder again")
+            trashFolderFromMap(mapPanel.rows.first{$0.title == "Small"}!.node!,confirmed:true);settle();settle();precondition(!FileManager.default.fileExists(atPath:smallURL.path))
+            try FileManager.default.createDirectory(at:smallURL,withIntermediateDirectories:true);undoTrash();settle()
+            precondition(activeHistory.blockedCount == 1 && !retryButton.isHidden,"A folder whose path was taken waits for retry")
+            try FileManager.default.removeItem(at:smallURL);retryRestore();settle();precondition(activeHistory.blockedCount == 0 && FileManager.default.fileExists(atPath:smallURL.appendingPathComponent("tiny.txt").path))
+            try FileManager.default.createDirectory(at:mapFolder.appendingPathComponent(".hiddencache/inner"),withIntermediateDirectories:true);try Data("h".utf8).write(to:mapFolder.appendingPathComponent(".hiddencache/inner/x"))
+            try FileManager.default.createDirectory(at:mapFolder.appendingPathComponent("Tool.app/Contents"),withIntermediateDirectories:true);try Data("t".utf8).write(to:mapFolder.appendingPathComponent("Tool.app/Contents/x"))
+            let locked=mapFolder.appendingPathComponent("Locked/inner");try FileManager.default.createDirectory(at:locked,withIntermediateDirectories:true);try FileManager.default.setAttributes([.posixPermissions:0],ofItemAtPath:locked.path)
+            startMap(mapFolder);settle()
+            for name in [".hiddencache","Tool.app","Locked"] { mapPanel.table.selectRowIndexes(IndexSet(integer:mapPanel.rows.firstIndex{$0.title == name}!),byExtendingSelection:false);precondition(mapPanel.trashableFolder == nil && !mapPanel.trashButton.isEnabled,"\(name) cannot be moved whole") }
+            try FileManager.default.setAttributes([.posixPermissions:0o755],ofItemAtPath:locked.path)
+            mapPanel.table.selectRowIndexes(IndexSet(integer:mapPanel.rows.firstIndex{$0.title == ".hiddencache"}!),byExtendingSelection:false);mapPanel.openSelected()
+            precondition(mapPanel.current?.name == ".hiddencache" && mapPanel.trashableFolder == nil,"Folders under a hidden folder are not offered either")
+            trashFolder(mapFolder.appendingPathComponent(".hiddencache/inner"),root:mapRoot!,title:"inner",explanation:nil,confirmed:true){ precondition(false,"must not move") }
+            precondition(FileManager.default.fileExists(atPath:mapFolder.appendingPathComponent(".hiddencache/inner/x").path) && status.stringValue == L("Nothing moved","שום דבר לא הועבר"))
+            try FileManager.default.removeItem(at:mapFolder.appendingPathComponent("Tool.app"));try FileManager.default.removeItem(at:mapFolder.appendingPathComponent("Locked"))
             // Free up space: a synthetic home with known locations, measured on request, moved with the same guarded flow, restored with Undo.
             let fakeHome=temp.appendingPathComponent("home",isDirectory:true)
             try FileManager.default.createDirectory(at:fakeHome.appendingPathComponent("Library/Developer/Xcode/DerivedData/Proj"),withIntermediateDirectories:true)
             try Data(repeating:0x44,count:30_000).write(to:fakeHome.appendingPathComponent("Library/Developer/Xcode/DerivedData/Proj/index.bin"))
             try FileManager.default.createDirectory(at:fakeHome.appendingPathComponent("Library/Caches/com.example.app"),withIntermediateDirectories:true)
             try FileManager.default.createDirectory(at:fakeHome.appendingPathComponent("Library/Mail"),withIntermediateDirectories:true)
-            freeUpPanel.home=fakeHome;freeUpPanel.reload();precondition(Set(freeUpPanel.rows.map{$0.location.id}) == ["xcode.derivedData","mail","cache.com.example.app","system.caches"],"\(freeUpPanel.rows.map{$0.location.id})")
-            measureLocations(freeUpPanel.unmeasured);settle()
-            let derived=freeUpPanel.rows.first{$0.location.id == "xcode.derivedData"}!;precondition((derived.measurement?.bytes ?? 0) >= 30_000 && freeUpPanel.rows.first{$0.location.id == "mail"}!.measurement?.files == 0)
+            home=fakeHome;showFreeUp();precondition(freeUpMode && sidebarFreeUp.contentTintColor == .controlAccentColor && freeUpPanel.home.path == fakeHome.path)
+            precondition(Set(freeUpPanel.rows.map{$0.location.id}) == ["xcode.derivedData","mail","cache.com.example.app","system.caches"],"\(freeUpPanel.rows.map{$0.location.id})")
+            freeUpPanel.measureAll();settle()
+            let derived=freeUpPanel.rows.first{$0.location.id == "xcode.derivedData"}!;let mailRow=freeUpPanel.rows.first{$0.location.id == "mail"}!
+            precondition(derived.measurement?.error == nil && (derived.measurement?.bytes ?? 0) >= 30_000 && mailRow.measurement?.error == nil && mailRow.measurement?.files == 0)
+            precondition(!derived.location.url(home:freeUpPanel.home).path.hasPrefix(FileManager.default.homeDirectoryForCurrentUser.path+"/Library"),"The smoke must never measure the real home folder")
             freeUpPanel.table.selectRowIndexes(IndexSet(integer:freeUpPanel.rows.firstIndex{$0.location.id == "mail"}!),byExtendingSelection:false);precondition(!freeUpPanel.trashButton.isEnabled,"Mail is never offered for Trash")
             freeUpPanel.table.selectRowIndexes(IndexSet(integer:freeUpPanel.rows.firstIndex{$0.location.id == "xcode.derivedData"}!),byExtendingSelection:false);precondition(freeUpPanel.trashButton.isEnabled)
             let derivedURL=fakeHome.appendingPathComponent("Library/Developer/Xcode/DerivedData")
-            let homeRoot=try FileSafety.root(fakeHome);trashFolder(derivedURL,root:homeRoot,title:"DerivedData",explanation:nil,confirmed:true){ self.freeUpPanel.markMoved(derived.location) };settle();settle()
-            precondition(!FileManager.default.fileExists(atPath:derivedURL.path) && freeUpPanel.rows.first{$0.location.id == "xcode.derivedData"}!.moved && historyFor(homeRoot).sessionMovedBytes >= 30_000,"Known location moved as one folder")
-            let restoredFolder=historyFor(homeRoot).undo(backend:trashBackend)!;precondition(restoredFolder.restored.map(\.path) == [derivedURL.path] && FileManager.default.fileExists(atPath:derivedURL.appendingPathComponent("Proj/index.bin").path))
-            try FileManager.default.removeItem(at:fakeHome);freeUpPanel.home=FileManager.default.homeDirectoryForCurrentUser
+            let homeRoot=try FileSafety.root(fakeHome)
+            trashLocation(mailRow.location,measured:mailRow.measurement!,confirmed:true);precondition(FileManager.default.fileExists(atPath:fakeHome.appendingPathComponent("Library/Mail").path),"Mail is never moved by the app")
+            trashLocation(derived.location,measured:derived.measurement!,confirmed:true);settle();settle()
+            precondition(!FileManager.default.fileExists(atPath:derivedURL.path) && freeUpPanel.rows.first{$0.location.id == "xcode.derivedData"}!.moved && historyFor(homeRoot).sessionMovedBytes >= 30_000 && activeHistory === historyFor(homeRoot) && undoButton.isEnabled && !redoButton.isEnabled,"Known location moved as one folder; Undo follows the free-up root")
+            undoTrash();settle()
+            precondition(FileManager.default.fileExists(atPath:derivedURL.appendingPathComponent("Proj/index.bin").path) && !freeUpPanel.rows.first{$0.location.id == "xcode.derivedData"}!.moved && freeUpPanel.rows.first{$0.location.id == "xcode.derivedData"}!.measurement == nil,"Undo brings the folder back and asks to measure again")
+            setFreeUp(false);home=FileManager.default.homeDirectoryForCurrentUser;freeUpPanel.home=home;try FileManager.default.removeItem(at:fakeHome)
             let savedRoot=root!;activateRoot(temp.appendingPathComponent("other"));precondition(!history.canUndo && !history.canRedo);activateRoot(savedRoot);precondition(history.canRedo)
             toggleTrashConfirmation(confirmationMenuItem!);precondition(!preferences.bool(forKey:"skipTrashConfirmation"))
             let languageItems=languageMenuItem!.submenu!.items;precondition(languageItems.map{$0.representedObject as? String} == ["en","he"] && languageItems[0].state == .on)
