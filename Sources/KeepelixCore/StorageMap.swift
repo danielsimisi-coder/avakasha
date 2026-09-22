@@ -55,6 +55,13 @@ public final class StorageNode {
     public var hasCaveats: Bool { inaccessible > 0 || notDownloaded > 0 || otherVolumes > 0 || isUnreadable }
 }
 
+/// One of the largest files under a mapped folder. `bytes` are allocated blocks, like `StorageNode.bytes`.
+public struct LargeFile: Equatable {
+    public let url: URL
+    public let bytes: Int64
+    public init(url: URL, bytes: Int64) { self.url = url; self.bytes = bytes }
+}
+
 public struct StorageMapResult {
     public let root: StorageNode
     public let cancelled: Bool
@@ -62,19 +69,42 @@ public struct StorageMapResult {
     public let entries: Int
     /// Regular files with more than one hard link whose data was only counted once.
     public let sharedFiles: Int
+    /// The `limit` largest reviewable files, sorted by bytes descending, ties by path ascending. Follows the
+    /// file-review policy of `Scanner`: no package contents, hidden files or files under hidden folders, cloud
+    /// placeholders or app databases, and hard-linked data listed once. Partial after cancellation.
+    public let largestFiles: [LargeFile]
+}
+
+/// The largest files seen so far, kept as a sorted array with a cutoff so memory stays O(limit) however many files the walk visits.
+struct LargestFiles {
+    let limit: Int
+    private(set) var items: [LargeFile] = []
+    init(limit: Int) { self.limit = max(0, limit) }
+    static func precedes(_ a: LargeFile, _ b: LargeFile) -> Bool { a.bytes == b.bytes ? a.url.path < b.url.path : a.bytes > b.bytes }
+    /// Cheap pre-check so files that cannot make the list never get a name or URL built for them.
+    func admits(bytes: Int64) -> Bool { limit > 0 && (items.count < limit || bytes >= items[limit - 1].bytes) }
+    mutating func insert(_ file: LargeFile) {
+        if items.count == limit, let last = items.last, !Self.precedes(file, last) { return }
+        var lo = 0, hi = items.count
+        while lo < hi { let mid = (lo + hi) / 2; if Self.precedes(items[mid], file) { lo = mid + 1 } else { hi = mid } }
+        items.insert(file, at: lo); if items.count > limit { items.removeLast() }
+    }
 }
 
 public enum StorageMapper {
     private static let SF_DATALESS_FLAG: UInt32 = 0x40000000
     private static let UF_HIDDEN_FLAG: UInt32 = 0x00008000
+    /// App databases and thumbnail caches are not browseable media; same list as `Scanner`.
+    private static let unreviewableExtensions: Set<String> = ["sqlite", "sqlite-wal", "sqlite-shm", "db", "db-wal", "db-shm", "thumb", "mmsthumb", "favicon"]
 
     /// Walks `root` without following symbolic links and without leaving its volume.
     /// The callback receives entries visited and bytes measured so far. Never reads file contents.
-    public static func map(root: URL, token: CancellationToken, progress: (Int, Int64) -> Void = { _, _ in }) throws -> StorageMapResult {
-        try map(root: root, token: token, progress: progress, treatAsOtherVolume: { _ in false })
+    /// `limit` caps `largestFiles`, collected in the same walk so the app never needs a second scan.
+    public static func map(root: URL, token: CancellationToken, limit: Int = 200, progress: (Int, Int64) -> Void = { _, _ in }) throws -> StorageMapResult {
+        try map(root: root, token: token, limit: limit, progress: progress, treatAsOtherVolume: { _ in false })
     }
     /// `treatAsOtherVolume` lets synthetic tests exercise the skip path without a real mount point.
-    static func map(root: URL, token: CancellationToken, progress: (Int, Int64) -> Void, treatAsOtherVolume: (String) -> Bool) throws -> StorageMapResult {
+    static func map(root: URL, token: CancellationToken, limit: Int = 200, progress: (Int, Int64) -> Void, treatAsOtherVolume: (String) -> Bool) throws -> StorageMapResult {
         let rootURL = try FileSafety.root(root)
         var rootStat = stat()
         guard rootURL.withUnsafeFileSystemRepresentation({ lstat($0, &rootStat) }) == 0 else { throw TriageError.inaccessible }
@@ -89,6 +119,7 @@ public enum StorageMapper {
         var skippedPath: String? = nil          // fts returns a skipped directory once more, as FTS_DP; ignore that visit
         var seenLinks = Set<String>()           // "dev:inode" for files with st_nlink > 1
         var sharedFiles = 0, entries = 0, cancelled = false
+        var largest = LargestFiles(limit: limit)
         func currentTotal() -> Int64 { stack.reduce(0) { $0 + $1.bytes } }
 
         while let entry = fts_read(handle) {
@@ -135,7 +166,13 @@ public enum StorageMapper {
                     let key = "\(s.pointee.st_dev):\(s.pointee.st_ino)"
                     if !seenLinks.insert(key).inserted { sharedFiles += 1; node.addSharedFile(); continue }
                 }
-                node.addFile(bytes: Int64(s.pointee.st_blocks) * 512)
+                let allocated = Int64(s.pointee.st_blocks) * 512
+                node.addFile(bytes: allocated)
+                // fts_path ends with the entry's name, so its last fts_namelen bytes are the name without copying the struct.
+                let namePtr = e.fts_path + Int(e.fts_pathlen) - Int(e.fts_namelen)
+                guard largest.admits(bytes: allocated), namePtr.pointee != 0x2E /* "." */, flags & UF_HIDDEN_FLAG == 0,
+                      !stack.contains(where: \.isHidden), !unreviewableExtensions.contains((String(cString: namePtr) as NSString).pathExtension.lowercased()) else { continue }
+                largest.insert(LargeFile(url: URL(fileURLWithPath: String(cString: e.fts_path), isDirectory: false), bytes: allocated))
             case FTS_DNR, FTS_ERR:
                 // fts reports an unreadable directory a second time, after its preorder FTS_D visit and without FTS_DP.
                 if level == 0 { throw TriageError.inaccessible }
@@ -157,6 +194,6 @@ public enum StorageMapper {
         guard let root = stack.first else { throw TriageError.inaccessible }
         root.sortRecursively()
         progress(entries, root.bytes)
-        return StorageMapResult(root: root, cancelled: cancelled, entries: entries, sharedFiles: sharedFiles)
+        return StorageMapResult(root: root, cancelled: cancelled, entries: entries, sharedFiles: sharedFiles, largestFiles: largest.items)
     }
 }
