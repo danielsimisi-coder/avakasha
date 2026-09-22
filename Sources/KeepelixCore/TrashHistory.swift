@@ -10,6 +10,12 @@ public final class TrashHistory {
     /// Restores that hit a conflict (an existing file at the original path, or a changed Trash item).
     /// They wait here for an explicit retry and never block Undo of earlier batches.
     private var blocked: [UndoBatch] = []
+    /// Allocated bytes (disk blocks, not logical size) of every file this session moved to Trash and has not restored.
+    /// It is what the user moved, not what is free: Trash keeps the blocks until emptied, and APFS clones can free less.
+    public private(set) var sessionMovedBytes: Int64 = 0
+    /// Allocated bytes recorded when each ticket was created, keyed by the Trash location so a later move of a file at
+    /// the same original path (while the first waits in `blocked`) cannot be confused with it.
+    private var ticketBytes: [String: Int64] = [:]
     public init() {}
     public var canUndo: Bool { !undoStack.isEmpty }
     public var canRedo: Bool { !redoStack.isEmpty }
@@ -22,8 +28,25 @@ public final class TrashHistory {
         if !result.tickets.isEmpty {
             undoStack.append(UndoBatch(root: root, tickets: result.tickets, keepers: keepers))
             redoStack.removeAll()
+            count(result.tickets, from: files)
         }
         return result
+    }
+
+    /// Adds the allocated bytes of the files behind freshly created tickets; failed files never count.
+    private func count(_ tickets: [RestoreTicket], from files: [FileRecord]) {
+        let bytes = Dictionary(files.map { ($0.id, $0.allocatedBytes) }, uniquingKeysWith: { first, _ in first })
+        for ticket in tickets {
+            guard let size = bytes[ticket.original.path] else { continue }
+            ticketBytes[ticket.trashed.path] = size; sessionMovedBytes += size
+        }
+    }
+    /// Subtracts the bytes recorded at move time for every ticket that was actually restored; never below zero.
+    private func discount(_ tickets: [RestoreTicket]) {
+        for ticket in tickets {
+            guard let size = ticketBytes.removeValue(forKey: ticket.trashed.path) else { continue }
+            sessionMovedBytes = max(0, sessionMovedBytes - size)
+        }
     }
 
     public func undo(backend: TrashBackend = SystemTrash()) -> RestoreResult? {
@@ -56,6 +79,7 @@ public final class TrashHistory {
         let result = RestoreResult(restored: attempt.restored, pending: pending, failures: failures)
         if !result.pending.isEmpty { blocked.append(UndoBatch(root: batch.root, tickets: result.pending, keepers: batch.keepers)) }
         let restored = Set(result.restored.map(\.path))
+        discount(batch.tickets.filter { restored.contains($0.original.path) })
         let records = batch.tickets.compactMap { ticket -> FileRecord? in
             guard restored.contains(ticket.original.path), let record = try? FileRecord(url: ticket.original),
                   record.identity == ticket.identity, (try? FileSafety.validate(record, root: batch.root)) != nil else { return nil }
@@ -69,7 +93,7 @@ public final class TrashHistory {
         guard let batch = redoStack.popLast() else { return nil }
         // Original identities and keeper guards are retained; never adopt replacement files.
         let result = TrashService.move(batch.files, root: batch.root, keepers: batch.keepers, backend: backend)
-        if !result.tickets.isEmpty { undoStack.append(UndoBatch(root: batch.root, tickets: result.tickets, keepers: batch.keepers)) }
+        if !result.tickets.isEmpty { undoStack.append(UndoBatch(root: batch.root, tickets: result.tickets, keepers: batch.keepers)); count(result.tickets, from: batch.files) }
         let moved = Set(result.tickets.map { $0.original.path })
         let pending = batch.files.filter { !moved.contains($0.id) }
         if !pending.isEmpty { redoStack.append(RedoBatch(root: batch.root, files: pending, keepers: batch.keepers)) }
