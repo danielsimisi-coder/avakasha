@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="620" viewBox="0 0 1280 620" role="img" aria-label="FileTriage: Preview. Keep. Move on. A local macOS file review tool. Illustrative interface with synthetic files.">
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="620" viewBox="0 0 1280 620" role="img" aria-label="Keepelix: Preview. Keep. Move on. A local macOS file review tool. Illustrative interface with synthetic files.">
 <defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#102e34"/><stop offset="1" stop-color="#14212c"/></linearGradient><linearGradient id="photo" x2="0" y2="1"><stop stop-color="#b4dbce"/><stop offset="1" stop-color="#f0ead6"/></linearGradient></defs>
 <rect width="1280" height="620" rx="24" fill="url(#bg)"/>
 <g font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif">
 <rect x="58" y="58" width="64" height="64" rx="17" fill="#9fe2c6"/><path d="M76 78h27M76 91h18M76 104h11" stroke="#173c3b" stroke-width="5" stroke-linecap="round"/><path d="m94 103 5 5 10-13" fill="none" stroke="#173c3b" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
-<text x="142" y="102" fill="#f7f9f7" font-size="40" font-weight="650">FileTriage</text>
+<text x="142" y="102" fill="#f7f9f7" font-size="40" font-weight="650">Keepelix</text>
 <text x="58" y="207" fill="#f7f9f7" font-size="53" font-weight="650">Preview. Keep.</text><text x="58" y="269" fill="#9fe2c6" font-size="53" font-weight="650">Move on.</text>
 <text x="60" y="320" fill="#bacbd0" font-size="20">A calmer way to review large files.</text><text x="60" y="354" fill="#bacbd0" font-size="20">On your Mac. Under your control.</text>
 <rect x="60" y="409" width="89" height="36" rx="9" fill="#29454b"/><text x="78" y="433" fill="#e5efeb" font-size="16">Space</text><text x="163" y="433" fill="#bacbd0" font-size="17">preview</text>
@@ -11,7 +11,7 @@
 <rect x="549" y="74" width="674" height="465" rx="15" fill="#f4f6f4"/>
 <path d="M564 74h644q15 0 15 15v34H549V89q0-15 15-15" fill="#e1e7e4"/>
 <circle cx="572" cy="99" r="5" fill="#cb7871"/><circle cx="590" cy="99" r="5" fill="#dcb976"/><circle cx="608" cy="99" r="5" fill="#80b594"/>
-<text x="835" y="104" fill="#40544c" font-size="15">FileTriage</text>
+<text x="835" y="104" fill="#40544c" font-size="15">Keepelix</text>
 <rect x="568" y="141" width="129" height="31" rx="7" fill="#d6e9df"/><text x="582" y="161" fill="#264f40" font-size="13">Choose folder</text>
 <text x="715" y="161" fill="#5c6d65" font-size="13">All files</text><text x="822" y="161" fill="#5c6d65" font-size="13">Exact copies</text><text x="946" y="161" fill="#5c6d65" font-size="13">Similar images</text>
 <rect x="568" y="194" width="276" height="40" rx="5" fill="#d4e8df"/><text x="580" y="219" fill="#244a3a" font-size="14">coast-walk.mov</text><text x="787" y="219" fill="#52685c" font-size="12">840 MB</text>

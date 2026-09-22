@@ -7,20 +7,20 @@ mkdir -p "$build_root" dist
 for arch in arm64 x86_64; do
   swift build -c release --arch "$arch" --scratch-path "$build_root/$arch" -Xswiftc -debug-prefix-map -Xswiftc "$PWD=."
 done
-stage="$(mktemp -d "${TMPDIR:-/tmp}/filetriage-package.XXXXXX")"
+stage="$(mktemp -d "${TMPDIR:-/tmp}/keepelix-package.XXXXXX")"
 trap 'rm -rf "$stage"' EXIT
-app="$stage/FileTriage.app"
+app="$stage/Keepelix.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp LICENSE "$app/Contents/Resources/LICENSE.txt"
-arm_bin="$(swift build -c release --arch arm64 --scratch-path "$build_root/arm64" --show-bin-path)/FileTriage"
-intel_bin="$(swift build -c release --arch x86_64 --scratch-path "$build_root/x86_64" --show-bin-path)/FileTriage"
-lipo -create "$arm_bin" "$intel_bin" -output "$app/Contents/MacOS/FileTriage"
-strip -S "$app/Contents/MacOS/FileTriage"
+arm_bin="$(swift build -c release --arch arm64 --scratch-path "$build_root/arm64" --show-bin-path)/Keepelix"
+intel_bin="$(swift build -c release --arch x86_64 --scratch-path "$build_root/x86_64" --show-bin-path)/Keepelix"
+lipo -create "$arm_bin" "$intel_bin" -output "$app/Contents/MacOS/Keepelix"
+strip -S "$app/Contents/MacOS/Keepelix"
 /usr/libexec/PlistBuddy -c 'Clear dict' "$app/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c 'Add :CFBundleExecutable string FileTriage' "$app/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c 'Add :CFBundleIdentifier string io.github.danielsimisi-coder.FileTriage' "$app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleExecutable string Keepelix' "$app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleIdentifier string io.github.danielsimisi-coder.Keepelix' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :NSHumanReadableCopyright string © 2026 Daniel Siman Tov — daniel.simisi@gmail.com' "$app/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c 'Add :CFBundleName string FileTriage' "$app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleName string Keepelix' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :CFBundlePackageType string APPL' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string ${version%%-*}" "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :CFBundleVersion string 2' "$app/Contents/Info.plist"
@@ -37,8 +37,8 @@ else
   echo 'AD-HOC BUILD: not Developer ID signed or notarized. Do not label as notarized.'
 fi
 codesign --verify --strict "$app"
-"$app/Contents/MacOS/FileTriage" --launch-check
-archive="dist/FileTriage-$version-universal.zip"
+"$app/Contents/MacOS/Keepelix" --launch-check
+archive="dist/Keepelix-$version-universal.zip"
 ditto --norsrc --noextattr -c -k --keepParent "$app" "$archive"
 if [ -n "${NOTARY_PROFILE:-}" ]; then
   test -n "${SIGN_IDENTITY:-}" || { echo 'NOTARY_PROFILE requires SIGN_IDENTITY'; exit 1; }

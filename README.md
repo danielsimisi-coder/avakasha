@@ -1,7 +1,7 @@
-<p align="center"><img src="assets/hero.svg" alt="FileTriage — Preview. Keep. Move on." width="100%"></p>
+<p align="center"><img src="assets/keepelix-preview.png" alt="Keepelix — actual app with generated demo files" width="100%"></p>
 
 <p align="center">
-  <a href="https://github.com/danielsimisi-coder/filetriage/actions/workflows/ci.yml"><img alt="macOS checks" src="https://github.com/danielsimisi-coder/filetriage/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="https://github.com/danielsimisi-coder/keepelix/actions/workflows/ci.yml"><img alt="macOS checks" src="https://github.com/danielsimisi-coder/keepelix/actions/workflows/ci.yml/badge.svg"></a>
   <img alt="macOS 13 or later" src="https://img.shields.io/badge/macOS-13%2B-163a3a">
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-33785e"></a>
   <img alt="Beta" src="https://img.shields.io/badge/status-beta-d8a354">
@@ -9,20 +9,26 @@
 
 <p align="center"><strong>Review large files with your eyes and your keyboard.</strong><br>Choose a folder. Preview a file. Keep it or move it to Trash. Continue.</p>
 
-<p align="center"><a href="https://github.com/danielsimisi-coder/filetriage/releases">Releases</a> · <a href="docs/DISTRIBUTION.md">Build from source</a> · <a href="docs/PRIVACY.md">Privacy</a> · <a href="docs/SAFETY.md">Safety</a> · <a href="docs/README.he.md">עברית</a></p>
+<p align="center"><a href="https://github.com/danielsimisi-coder/keepelix/releases">Releases</a> · <a href="docs/DISTRIBUTION.md">Build from source</a> · <a href="docs/PRIVACY.md">Privacy</a> · <a href="docs/SAFETY.md">Safety</a> · <a href="docs/README.he.md">עברית</a></p>
 
-## Why FileTriage?
+## Your Mac is full. But full of what?
 
-A disk analyser can tell you what is large. It cannot tell you which recording matters, which photo you want to keep, or whether an old document belongs to a client. FileTriage puts those decisions in a simple review flow, with local previews and the normal macOS Trash.
+Keepelix was born from a recurring frustration: **storage keeps filling up, you do not know where the space has gone, and the Mac’s built-in tools do not give you a clear, convenient way to work through the problem.**
 
-No account. No cloud analysis. No automatic permanent deletion.
+A storage total tells you that you have a problem. A folder full of unfamiliar filenames still leaves the hard part: finding the large files, seeing what they actually contain, and deciding what you can let go of without losing something important.
+
+The first pile we tackled was accumulated WhatsApp media: old videos, repeated images and forgotten attachments mixed with useful files and client material. But WhatsApp was one example of the broader problem. Downloads, Movies and external drives can build up the same way.
+
+Keepelix makes the review practical. Choose a folder or drive, sort by size, and work through the files: **Space to preview, Delete to move to Trash, ↓ to continue.** Older-file filters and duplicate suggestions help narrow the pile; Undo helps recover from a mistaken move. You decide what matters.
+
+**No WhatsApp account connection. No cloud analysis. No automatic permanent deletion.** Keepelix reviews your chosen location; it does not automatically diagnose every source of disk usage, read conversations or identify client files.
 
 ## What it does
 
 | Review | Compare | Stay in control |
 |---|---|---|
 | Space for Quick Look; arrows for the next file | SHA-256 exact-copy groups | Confirmed batch moves to macOS Trash |
-| Command/Shift multi-selection | Select extra copies while keeping one | Undo the latest batch during this session |
+| Command/Shift multi-selection | Select extra copies while keeping one | Undo and redo batches during this session |
 | Filter by name, type and size | Opt-in, local similar-image suggestions | Changed-file and path checks before each move |
 | Right-click to reveal the original in Finder | Paired previews for comparison | Progress, cancellation and per-file errors |
 | Explicit resume of your last folder and position | Hard links are not treated as extra copies | No private file inventory in the app bundle |
@@ -31,7 +37,7 @@ No account. No cloud analysis. No automatic permanent deletion.
 
 **macOS 13 or later.** The release package contains a universal Apple Silicon + Intel app.
 
-1. Get the ZIP from [Releases](https://github.com/danielsimisi-coder/filetriage/releases), extract it, and open FileTriage.
+1. Get the ZIP from [Releases](https://github.com/danielsimisi-coder/keepelix/releases), extract it, and open Keepelix.
 2. Click **WhatsApp**, **Downloads**, **Movies**, **Pictures**, **Documents** or **Desktop**, or choose **Other folder or drive**. Each scans only the selected location. WhatsApp checks its local media folder on click and offers a folder picker if unavailable; no account connection is needed. Pictures skips Photos library packages.
 3. Select a row and press **Space**. Use **↓** or **Keep & next** to continue.
 4. Use **⌘-click** or **Shift-click** to select several files. The count and size are shown before you confirm **Move to Trash**.
@@ -47,8 +53,9 @@ No account. No cloud analysis. No automatic permanent deletion.
 | `⌘` + click | Add or remove a file from the selection |
 | `Shift` + click | Select a range |
 | `⌘A` | Select the filtered list; in search text, select the text |
-| `⌘⌫` | Confirm moving the selection to Trash |
+| `Delete` / `⌘⌫` | Move selected files to Trash (confirmation enabled by default) |
 | `⌘Z` | Restore the latest Trash batch from this app session |
+| `⇧⌘Z` | Redo the last restored batch with fresh safety checks |
 | Right-click | Reveal the clicked original in Finder |
 
 ## Exact is different from similar
@@ -61,7 +68,7 @@ No account. No cloud analysis. No automatic permanent deletion.
 
 ## Before you move files
 
-- **Save important files elsewhere first.** FileTriage is not a backup tool.
+- **Save important files elsewhere first.** Keepelix is not a backup tool.
 - **Close the owning app** before deleting its media. Removing WhatsApp or another application's files can leave missing attachments; future re-download is not guaranteed.
 - **Downloaded cloud files may sync deletions.** Undownloaded placeholders are skipped, but that does not make downloaded cloud content disposable.
 - **Trash is not free space yet.** Empty it yourself only after reviewing what you removed.
@@ -74,10 +81,10 @@ The app does not read chat databases or identify clients. It is an independent f
 No third-party dependencies. Requires Swift 5.9+ and macOS development tools.
 
 ```sh
-git clone https://github.com/danielsimisi-coder/filetriage.git
-cd filetriage
+git clone https://github.com/danielsimisi-coder/keepelix.git
+cd keepelix
 swift test
-swift run FileTriage
+swift run Keepelix
 ```
 
 Package a universal app:
@@ -91,8 +98,8 @@ Tests use disposable, generated fixtures. They exercise root boundaries, stale f
 ## Project layout
 
 ```text
-Sources/FileTriage/       Native AppKit interface and Quick Look
-Sources/FileTriageCore/   Scanning, duplicate analysis, Trash and restore
+Sources/Keepelix/       Native AppKit interface and Quick Look
+Sources/KeepelixCore/   Scanning, duplicate analysis, Trash and restore
 Tests/                   Synthetic filesystem acceptance tests
 scripts/                 Packaging and source privacy checks
 docs/                    Privacy, safety, release and contributor guidance
@@ -110,4 +117,18 @@ Released under the [MIT License](LICENSE). Built to help people decide what to k
 
 © 2026 **Daniel Siman Tov**. Contact: [daniel.simisi@gmail.com](mailto:daniel.simisi@gmail.com).
 
-FileTriage is available under the [MIT License](LICENSE).
+Keepelix is available under the [MIT License](LICENSE).
+
+## Review older files
+
+Choose a folder, then **Older files** in the sidebar. Filter files not modified in 6 months, 1 year, 2 years or 5 years. Sort by largest, smallest, oldest, newest or name; the Name, On disk and Last modified column headers also sort the list. Switching review views clears selection.
+
+“Old” means last modified before the selected cutoff. It does not mean you have not opened the file, and it never means the file is safe to delete automatically. The view remains limited to your chosen folder. The **Trash** shortcut opens your user Trash folder in Finder.
+
+The Trash confirmation offers **Do not show again**. Re-enable it from **Keepelix → Confirm before Trash**. Undo and Redo also have buttons; successful actions update the status without extra popups. History lasts only for the current session.
+
+![Older files view with generated demo files](assets/keepelix-older-files.png)
+
+Screenshots show the real app using generated, read-only demo files.
+
+Undo/Redo history is separate for each chosen folder during the session. Switching folders cannot replay an action in the previous folder; return to that folder to access its history. If a restore is blocked, resolve the reported conflict and retry, or restore through Finder Trash. Earlier batches wait behind that unresolved batch.

@@ -4,7 +4,7 @@ import Darwin
 import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
-@testable import FileTriageCore
+@testable import KeepelixCore
 
 final class CoreTests: XCTestCase {
     var base: URL!; var root: URL!; var trash: URL!
@@ -40,13 +40,13 @@ final class CoreTests: XCTestCase {
     }
     func testSystemTrashRoundTripWithOwnedSyntheticFile()throws {
         try XCTSkipUnless(ProcessInfo.processInfo.environment["FILETRIAGE_SYSTEM_TRASH_TEST"] == "1", "Opt-in integration test; uses only this test's generated file")
-        let a=try file("FileTriage-synthetic-"+UUID().uuidString+".txt","Disposable FileTriage integration fixture")
+        let a=try file("Keepelix-synthetic-"+UUID().uuidString+".txt","Disposable Keepelix integration fixture")
         let result=TrashService.move([a],root:root)
         XCTAssertTrue(result.failures.isEmpty, result.failures.map(\.message).joined(separator:"; "))
         XCTAssertEqual(result.tickets.count,1)
         let restored=TrashService.undo(result.tickets,root:root)
         XCTAssertTrue(restored.failures.isEmpty);XCTAssertEqual(restored.restored,[a.url])
-        XCTAssertEqual(try String(contentsOf:a.url),"Disposable FileTriage integration fixture")
+        XCTAssertEqual(try String(contentsOf:a.url),"Disposable Keepelix integration fixture")
     }
     func testChangedFileIsNotMoved()throws{
         let r=try file("changed.txt");try Data("new bytes".utf8).write(to:r.url)
@@ -136,9 +136,64 @@ final class CoreTests: XCTestCase {
     func testDifferentExtendedAttributesBlockAutoSelection()throws {
         let a=try file("a.txt"),b=try file("b.txt")
         let bytes=Array("unique tag".utf8)
-        XCTAssertEqual(bytes.withUnsafeBytes{setxattr(b.id,"org.filetriage.fixture",$0.baseAddress,$0.count,0,0)},0)
+        XCTAssertEqual(bytes.withUnsafeBytes{setxattr(b.id,"org.keepelix.fixture",$0.baseAddress,$0.count,0,0)},0)
         let selection=ExactDuplicates.selectExtras([DuplicateGroup(members:[a,b])],visible:[a.id,b.id])
         XCTAssertTrue(selection.ids.isEmpty)
+    }
+    func testOlderFilesUsesModificationDateNotAccessDate()throws {
+        let old=try file("old.txt"),fresh=try file("fresh.txt")
+        try FileManager.default.setAttributes([.modificationDate:Date(timeIntervalSince1970:946684800)],ofItemAtPath:old.id)
+        let updated=try FileRecord(url:old.url)
+        XCTAssertEqual(ReviewQuery.older([updated,fresh],than:Date(timeIntervalSince1970:1609459200)).map(\.id),[old.id])
+        XCTAssertEqual(ReviewQuery.sorted([fresh,updated],by:.oldest).first?.id,old.id)
+        XCTAssertEqual(ReviewQuery.sorted([fresh,updated],by:.newest).last?.id,old.id)
+    }
+    func testSizeSortIsDeterministicAndReversible()throws {
+        let small=try file("a.txt"),large=try file("b.txt",String(repeating:"x",count:100_000))
+        XCTAssertGreaterThan(large.allocatedBytes,small.allocatedBytes)
+        XCTAssertEqual(ReviewQuery.sorted([small,large],by:.largest).first?.id,large.id)
+        XCTAssertEqual(ReviewQuery.sorted([small,large],by:.smallest).first?.id,small.id)
+    }
+    func testHistoryUndoRedoRoundTrip()throws {
+        let a=try file("a.txt"),history=TrashHistory(),backend=FakeTrash(directory:trash)
+        XCTAssertEqual(history.move([a],root:root,backend:backend).tickets.count,1)
+        XCTAssertTrue(history.canUndo);XCTAssertFalse(history.canRedo)
+        XCTAssertEqual(history.undo(backend:backend)?.restored,[a.url])
+        XCTAssertFalse(history.canUndo);XCTAssertTrue(history.canRedo)
+        XCTAssertEqual(history.redo(backend:backend)?.tickets.count,1)
+        XCTAssertTrue(history.canUndo);XCTAssertFalse(history.canRedo)
+        XCTAssertEqual(history.undo(backend:backend)?.restored,[a.url])
+    }
+    func testNewMoveClearsRedoHistory()throws {
+        let a=try file("a.txt"),b=try file("b.txt"),history=TrashHistory(),backend=FakeTrash(directory:trash)
+        _=history.move([a],root:root,backend:backend);_=history.undo(backend:backend)
+        _=history.move([b],root:root,backend:backend)
+        XCTAssertFalse(history.canRedo);XCTAssertNil(history.redo(backend:backend))
+        XCTAssertTrue(FileManager.default.fileExists(atPath:a.id))
+    }
+    func testRedoRejectsChangedRestoredFile()throws {
+        let a=try file("a.txt"),history=TrashHistory(),backend=FakeTrash(directory:trash)
+        _=history.move([a],root:root,backend:backend);_=history.undo(backend:backend)
+        try Data("New unrelated replacement".utf8).write(to:a.url,options:.atomic)
+        let result=history.redo(backend:backend)!
+        XCTAssertTrue(result.tickets.isEmpty);XCTAssertEqual(result.failures.count,1)
+        XCTAssertEqual(try String(contentsOf:a.url),"New unrelated replacement")
+    }
+    func testRedoRetainsDuplicateKeeperProtection()throws {
+        let a=try file("a.txt"),b=try file("b.txt"),history=TrashHistory(),backend=FakeTrash(directory:trash)
+        XCTAssertEqual(history.move([b],root:root,keepers:[b.id:a],backend:backend).tickets.count,1)
+        _=history.undo(backend:backend);try FileManager.default.removeItem(at:a.url)
+        XCTAssertTrue(history.redo(backend:backend)!.tickets.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath:b.id))
+    }
+    func testPartialUndoOnlyRedoesRestoredFiles()throws {
+        let a=try file("a.txt"),b=try file("b.txt"),history=TrashHistory(),backend=FakeTrash(directory:trash)
+        _=history.move([a,b],root:root,backend:backend)
+        try Data("keep this new file".utf8).write(to:b.url)
+        XCTAssertEqual(history.undo(backend:backend)?.restored,[a.url])
+        XCTAssertTrue(history.canUndo);XCTAssertTrue(history.canRedo)
+        XCTAssertEqual(history.redo(backend:backend)?.tickets.map{ $0.original },[a.url])
+        XCTAssertEqual(try String(contentsOf:b.url),"keep this new file")
     }
     func testHardLinksAreNotExtraCopies()throws{
         let a=try file("a.txt");let link=root.appendingPathComponent("b.txt");try FileManager.default.linkItem(at:a.url,to:link)

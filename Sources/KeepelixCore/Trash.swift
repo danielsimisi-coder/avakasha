@@ -20,7 +20,7 @@ public struct SystemTrash: TrashBackend {
         var result: NSURL?
         try FileManager.default.trashItem(at: url, resultingItemURL: &result)
         guard let destination = result as URL? else {
-            throw NSError(domain: "FileTriage", code: 1, userInfo: [NSLocalizedDescriptionKey: "macOS moved the item but did not return its Trash location. Use Finder to restore it."])
+            throw NSError(domain: "Keepelix", code: 1, userInfo: [NSLocalizedDescriptionKey: "macOS moved the item but did not return its Trash location. Use Finder to restore it."])
         }
         return destination
     }
@@ -53,7 +53,7 @@ public enum TrashService {
                 do { actual = try FileIdentity(url: destination) }
                 catch {
                     tickets.append(RestoreTicket(original:file.url,trashed:destination,identity:file.identity))
-                    throw NSError(domain:"FileTriage",code:3,userInfo:[NSLocalizedDescriptionKey:"The file was moved, but its Trash identity could not be checked. Inspect it in Finder Trash; Undo may be unavailable."])
+                    throw NSError(domain:"Keepelix",code:3,userInfo:[NSLocalizedDescriptionKey:"The file was moved, but its Trash identity could not be checked. Inspect it in Finder Trash; Undo may be unavailable."])
                 }
                 let ticket = RestoreTicket(original: file.url, trashed: destination, identity: actual)
                 var valid = actual == file.identity
@@ -68,7 +68,7 @@ public enum TrashService {
                 if !valid {
                     let rollback = undo([ticket], root: root, backend: backend)
                     tickets.append(contentsOf: rollback.pending)
-                    throw NSError(domain: "FileTriage", code: 2, userInfo: [NSLocalizedDescriptionKey: rollback.pending.isEmpty ? "A concurrent change was detected. The moved file was restored; scan again." : "A concurrent change was detected. The file remains in Trash; use Undo or Finder to restore it."])
+                    throw NSError(domain: "Keepelix", code: 2, userInfo: [NSLocalizedDescriptionKey: rollback.pending.isEmpty ? "A concurrent change was detected. The moved file was restored; scan again." : "A concurrent change was detected. The file remains in Trash; use Undo or Finder to restore it."])
                 }
                 tickets.append(ticket)
             } catch { failures.append(FileFailure(url: file.url, message: error.localizedDescription)) }

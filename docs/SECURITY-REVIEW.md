@@ -18,3 +18,7 @@ Application source, packaging, CI, every reachable Git blob and the built univer
 This is a private beta, not a certification of zero vulnerabilities. Path-based Trash/Undo cannot eliminate all hostile concurrent filesystem races; important data still needs backups. Quick Look and image decoders are OS components. Cloud-folder deletions may sync; removing app media may break references. Undo is session-local. UserDefaults stores chosen paths locally. Similarity is a suggestion and never automatically selects files for deletion.
 
 Developer ID signing, Apple notarization, clean-Mac Gatekeeper testing, Intel runtime testing and broader permission/filesystem/accessibility acceptance remain necessary before a supported public release. External GLM review was not used; a full Coverloop external-review pass is not claimed.
+
+## Beta 2 focused follow-up
+
+Independent review of the new history and keyboard integration found no overwrite, replacement-adoption, containment or keeper bypass. A cross-folder history UX issue was fixed by keeping separate histories for each chosen root, covered by hidden UI regression. A failed latest restore continues to block older batches until resolved; Finder Trash recovery remains available. This is a documented beta limitation. Local validation now includes 28 passing core/integration tests and the expanded keyboard smoke.

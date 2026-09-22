@@ -2,7 +2,7 @@
 name: Bug report
 about: Report unexpected behavior using synthetic examples
 ---
-**macOS and FileTriage version**
+**macOS and Keepelix version**
 
 **Steps to reproduce**
 

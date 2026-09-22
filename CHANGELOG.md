@@ -2,13 +2,20 @@
 
 ## 0.1.0-beta.2
 
+- Add Delete-to-Trash, optional confirmation suppression, and session Undo/Redo with keyboard shortcuts and buttons.
+- Simplify the interface and confirmation dialogs.
+- Rename the project to Keepelix.
+- Redesign the interface with a sidebar, native icons, clearer empty states and dedicated review actions.
+- Add a Finder Trash shortcut, old-file filters and size/date/name sorting.
+- Add a read-only synthetic demo for documentation screenshots.
+
 - Fix a startup crash in the packaged app by using the standard preferences domain.
 - Verify production preferences and interface initialization from the signed app bundle during packaging.
 
 
 ## 0.1.0-beta.1
 
-First standalone release of FileTriage, replacing the personal review prototype.
+First standalone release of Keepelix, replacing the personal review prototype.
 
 - User-selected folders; asynchronous scan with progress and cancellation.
 - Keyboard preview, next-file navigation and contextual Reveal in Finder.

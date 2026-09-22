@@ -7,6 +7,8 @@ import subprocess
 
 root = pathlib.Path(__file__).resolve().parents[1]
 artwork = {
+    'assets/keepelix-preview.png': 'de27146eec2287094fd61eda87be6806c34399f2c6c98250e85370486f0882fc',
+    'assets/keepelix-older-files.png': '4e51d5dfa9610f64fdbd84e1df64132fe943768897bf53fb57ef5245f505e2f4',
     'assets/icon-1024.png': '95ff2ed3079abdc2143948ec1586c53a19fbdeb30ecbefa06d37c99f2129531b',
     'assets/AppIcon.icns': '9f603b3652db574dae84fa3b67f738a1455618a58590204bdee54be5f574dc97',
 }
