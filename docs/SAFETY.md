@@ -1,0 +1,29 @@
+# Review before removing
+
+FileTriage moves selected regular files to the operating system's Trash. It never empties Trash and does not provide permanent deletion.
+
+## What the app checks
+
+Every move is checked against the original selected root, current canonical path, filesystem device/inode, byte length and nanosecond modification time. Symbolic links and paths redirected through symbolic-link parents are rejected. File size and modification time are rechecked after duplicate hashing. Hard links are excluded as extra copies.
+
+Selecting extra exact duplicates leaves one deterministic original per group. Its presence and identity are checked again before each automatically selected extra is moved. File selection is always reviewable and a confirmation states the file count and combined on-disk size.
+
+## Undo
+
+Undo restores the last batch during the current app session. It does not overwrite existing files. Partial restore failures remain available for another attempt. After closing the app, use Finder Trash; application undo tickets are not persisted. Do not empty Trash until you are satisfied with the selection.
+
+## Limits
+
+- These checks protect against ordinary stale scans. They are not an atomic filesystem transaction and do not defend against malicious concurrent filesystem changes. Do not run it on folders actively rewritten by other apps.
+- Close the owning app before removing its media. Deleting WhatsApp or other app-managed media can leave missing attachments. No claim is made about synchronisation or future re-download availability.
+- Removing a downloaded file in a cloud-synced folder may also remove its cloud copy. The app skips undownloaded placeholders, but local downloaded cloud files still require care.
+- On-disk block totals are estimates, not promised savings: APFS clones, hard links, snapshots and Trash affect actual free space.
+- Image similarity uses a local difference hash with an aspect-ratio check. False positives and false negatives are expected. It does not understand which photo is important, higher quality or edited intentionally. It never auto-selects similar images.
+- Protected/unreadable files, hidden files, app packages, symlinks, databases and thumbnails are skipped. Some media formats lack a system Quick Look preview.
+- Avoid selecting the entire home folder. Choose a narrow folder of documents or media you recognise.
+
+This beta is a review tool, not a backup system or an automatic cleaner.
+
+Automatic extra selection compares extended attributes (including resource forks) and permissions; files with ACL entries or unreadable/large attributes require manual review. Groups describe matching data-fork bytes; they do not imply identical history or ownership. The keeper and extra are hashed again immediately before moving, and checked afterward. Concurrent-change detection attempts a no-overwrite rollback and reports any file still in Trash. These checks reduce ordinary races but do not make pathname-based macOS Trash operations atomic.
+
+Image comparison skips files over 100 MB or 100 megapixels. Cancel is checked between images; an individual ImageIO decode is not interruptible. After cancellation is requested, quitting is allowed for read-only work. Trash and Undo must finish before quitting.

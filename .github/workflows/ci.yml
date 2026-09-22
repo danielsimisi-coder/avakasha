@@ -1,0 +1,21 @@
+name: macOS checks
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Unit and filesystem acceptance tests
+        run: swift test
+      - name: Hidden synthetic UI smoke test
+        run: |
+          "$(swift build --show-bin-path)/FileTriage" --smoke-test
+      - name: Release compile
+        run: swift build -c release
+      - name: Audit tracked files for private payloads
+        run: python3 scripts/audit-source.py
