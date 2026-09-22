@@ -22,7 +22,7 @@ jobs:
       - name: Universal package and real bundled launch
         run: bash scripts/build-app.sh
       - name: Audit release payload
-        run: python3 scripts/audit-release.py dist/Keepelix-0.1.0-beta.4-universal.zip
+        run: python3 scripts/audit-release.py dist/Keepelix-0.1.0-beta.5-universal.zip
       - name: Audit tracked files for private payloads
         run: python3 scripts/audit-source.py
       - name: Privacy audit regression fixtures

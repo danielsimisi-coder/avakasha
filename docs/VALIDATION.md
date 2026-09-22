@@ -21,6 +21,10 @@ The final independent pass identified a mode-transition keeper-guard bug. Changi
 
 Beta 2 fixes a packaged-only startup crash: production now uses `UserDefaults.standard`, and packaging executes `--launch-check` inside the signed bundle using the production preferences path. This initializes the interface without opening a window or scanning files. CI now builds the universal package and runs this check plus the release payload audit.
 
+## Beta 5 checks
+
+Same 41 core cases. The hidden UI smoke now also checks the path label and type badge for the selection, the "Item N of M" counter, that a generated `.mov` opens in the inline player paused, play/pause and mute toggles, and that closing the preview releases the player. Visual check on the read-only demo with a generated clip.
+
 ## Beta 4 checks
 
 Same 41 core cases. The hidden UI smoke now also verifies the Language menu (English default, Hebrew choice writes the app-only language, `AppleLanguages` and layout-direction defaults, strings switch only on the next launch) and that clicking the loaded location again does not rescan. The Hebrew right-to-left layout was checked visually on the read-only demo and captured for the README. Packaged launch check and release audit passed with the declared localizations.

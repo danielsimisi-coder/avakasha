@@ -6,7 +6,7 @@ Keepelix has no networking client, analytics, account system, advertising SDK or
 - **Storage map:** reads folder and file names, allocated sizes and filesystem flags below the folder or drive you choose. It never reads file contents, never follows symbolic links and never enters other volumes. Nothing is stored after the session.
 - **Exact duplicates:** reads file bytes locally to calculate SHA-256. It does not read app databases or chat history.
 - **Similar images:** explicitly opt-in. Decodes images locally into tiny comparison thumbnails. Similarity is not a deletion recommendation.
-- **Preview:** reads only the selected file and, in duplicate views, a comparison file from the same group.
+- **Preview:** reads only the selected file and, in duplicate views, a comparison file from the same group. Video playback and the type badge use the system media frameworks locally; images are read for pixel size only, and nothing autoplays.
 - **Local settings:** the last chosen folder and selected file path are stored in this Mac's UserDefaults. A manually located WhatsApp media folder is also remembered locally. The confirmation preference and the interface language choice (which also sets this app's own language and layout-direction defaults) are stored locally. The file inventory and undo/redo tickets stay in memory and are discarded on exit.
 - **Permissions:** uses normal macOS file permissions. Protected folders may be skipped. Keepelix does not bypass OS restrictions or automatically request Full Disk Access.
 

@@ -12,6 +12,7 @@ artwork = {
     'assets/keepelix-older-files.png': {'4e51d5dfa9610f64fdbd84e1df64132fe943768897bf53fb57ef5245f505e2f4', '6472fdc44bccb5f9cd49cec3e641144180d89904d81770854bdbab8431f6dfd3'},
     'assets/keepelix-storage-map.png': {'1260c7ae83e01b4d35b12c5bae6e621067b6d294efbc65078281231e3a6e83e3'},
     'assets/keepelix-hebrew.png': {'35d47605559f3408daf487d12b490cbc8e4b0d4ad226456528891ec449591659'},
+    'assets/keepelix-video.png': {'42245c97681e81e00d511b253f803c4471bd5739115b8d6619965edd8ae52bb7'},
     'assets/icon-1024.png': {'95ff2ed3079abdc2143948ec1586c53a19fbdeb30ecbefa06d37c99f2129531b'},
     'assets/AppIcon.icns': {'9f603b3652db574dae84fa3b67f738a1455618a58590204bdee54be5f574dc97'},
 }

@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-beta.5
+
+- Show the selected file's path (home folder as ~) next to the selection controls, and the folder path in the storage map details.
+- Type badge for the selected file: image pixel size, video length, colour-coded icons in the list.
+- Videos in mp4, m4v or mov play inline with an always-visible transport bar (play/pause, scrubber, time, mute); other formats keep Quick Look. Nothing autoplays.
+- The counter reads "Item N of M · selected · size" so you always know where you are in the list.
+- Empty state says "Scanning…" while a scan runs. Read-only demo includes a generated three-second clip.
+
 ## 0.1.0-beta.4
 
 - English is the default interface language on every Mac. Keepelix › Language offers Hebrew, which applies on the next launch with full right-to-left layout; the choice is stored for this app only.

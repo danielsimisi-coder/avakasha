@@ -55,6 +55,7 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
     let detail = NSStackView()
     private let detailTitle = NSTextField(wrappingLabelWithString: "")
     private let detailSize = NSTextField(labelWithString: "")
+    private let detailPath = NSTextField(wrappingLabelWithString: "")
     private let detailFacts = NSTextField(wrappingLabelWithString: "")
     private let detailNotes = NSTextField(wrappingLabelWithString: "")
     private let caveat = NSTextField(wrappingLabelWithString: L("Sizes are space allocated on disk. Hard links, APFS clones, snapshots and cloud placeholders mean moving files to Trash may free a different amount.", "הגדלים הם המקום שמוקצה בדיסק. קישורים קשיחים, שכפולי APFS, תמונות מצב וקבצי ענן שלא הורדו גורמים לכך שהעברה לפח עשויה לפנות כמות שונה."))
@@ -99,14 +100,17 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         table.doubleAction = #selector(openSelected); table.target = self
 
         detailTitle.font = .systemFont(ofSize: 17, weight: .medium); detailTitle.maximumNumberOfLines = 3
+        detailPath.font = .monospacedSystemFont(ofSize: 11, weight: .regular); detailPath.textColor = .secondaryLabelColor; detailPath.maximumNumberOfLines = 3; detailPath.lineBreakMode = .byTruncatingMiddle; detailPath.isSelectable = true
+        detailPath.setAccessibilityLabel(L("Folder path", "נתיב התיקייה"))
         detailSize.font = .monospacedDigitSystemFont(ofSize: 28, weight: .semibold)
         detailFacts.font = .systemFont(ofSize: 12); detailFacts.textColor = .secondaryLabelColor
         detailNotes.font = .systemFont(ofSize: 12); detailNotes.textColor = .systemOrange
         caveat.font = .systemFont(ofSize: 11); caveat.textColor = .tertiaryLabelColor
         detail.orientation = .vertical; detail.alignment = .leading; detail.spacing = 10
-        for view in [detailSize, detailTitle, detailFacts, detailNotes, caveat] { detail.addArrangedSubview(view) }
+        for view in [detailSize, detailTitle, detailPath, detailFacts, detailNotes, caveat] { detail.addArrangedSubview(view) }
+        detail.setCustomSpacing(4, after: detailTitle)
         detail.setCustomSpacing(24, after: detailNotes)
-        for view in [detailTitle, detailFacts, detailNotes, caveat] { view.widthAnchor.constraint(equalTo: detail.widthAnchor).isActive = true }
+        for view in [detailTitle, detailPath, detailFacts, detailNotes, caveat] { view.widthAnchor.constraint(equalTo: detail.widthAnchor).isActive = true }
         detail.setAccessibilityLabel(L("Folder details", "פרטי התיקייה"))
         showNothing()
     }
@@ -210,12 +214,13 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         guard let current = current else {
             detailSize.stringValue = ""; detailTitle.stringValue = L("Where is the space?", "איפה המקום?")
             detailFacts.stringValue = L("Map a folder or drive to see which folders fill it, then review the files inside.", "מפה תיקייה או כונן כדי לראות אילו תיקיות ממלאות אותו, ואז סקור את הקבצים שבפנים.")
-            detailNotes.stringValue = ""; detailNotes.isHidden = true; return
+            detailNotes.stringValue = ""; detailNotes.isHidden = true; detailPath.stringValue = ""; detailPath.isHidden = true; return
         }
         let row = selectedRow; let node = row?.node ?? current
         let root = result?.root
         detailSize.stringValue = bytes(row?.bytes ?? current.bytes)
         detailTitle.stringValue = row?.node == nil && row != nil ? L("Files directly in ", "קבצים ישירות בתוך ") + current.name : node.name
+        detailPath.stringValue = (node.url.path as NSString).abbreviatingWithTildeInPath; detailPath.toolTip = node.url.path; detailPath.isHidden = false
         var facts: [String] = []
         if row?.node == nil, row != nil { facts.append("\(current.directFiles) " + L("files", "קבצים")) }
         else if !node.isUnreadable { facts.append("\(node.files) " + L("files", "קבצים") + " · \(node.directories) " + L("folders", "תיקיות")) }

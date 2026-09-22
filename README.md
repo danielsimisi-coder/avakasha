@@ -44,6 +44,10 @@ Sizes are space allocated on disk. Hard links, APFS clones, snapshots and cloud 
 
 ![File review with a Quick Look preview, generated demo files](assets/keepelix-preview.png)
 
+Videos in mp4, m4v or mov open in an inline player with controls that stay visible; other formats use Quick Look. The badge next to the path shows the type, image pixel size or video length, and the counter shows which item is highlighted out of the list.
+
+![Inline video player with the type badge and path, generated demo files](assets/keepelix-video.png)
+
 The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
 
 ![Storage map in Hebrew with right-to-left layout, generated demo files](assets/keepelix-hebrew.png)
@@ -53,7 +57,8 @@ The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
 | Review | Compare | Stay in control |
 |---|---|---|
 | Storage map of any folder or drive, largest folders first | SHA-256 exact-copy groups | Confirmed batch moves to macOS Trash |
-| Space for Quick Look; arrows for the next file | Side-by-side duplicate previews | Blocked restores wait for a retry and never overwrite |
+| Space for Quick Look; videos play inline with always-visible controls | Side-by-side duplicate previews | Blocked restores wait for a retry and never overwrite |
+| Type badge (image size, video length), path and "item N of M" for the selection | Loaded location highlighted in the sidebar | Delete does nothing in the map |
 | Command/Shift multi-selection | Select extra copies while keeping one | Undo and redo batches during this session |
 | Filter by name, type and size | Opt-in, local similar-image suggestions | Changed-file and path checks before each move |
 | Right-click to reveal the original in Finder | Hidden, protected and bundle folders are labelled in the map | Progress, cancellation and per-file errors |
@@ -136,7 +141,7 @@ docs/                    Privacy, safety, release and contributor guidance
 
 ## Status and contribution
 
-This is beta 4. Code compilation and automated tests are not substitutes for testing on every macOS version. The Intel slice is cross-built; real Intel-machine verification and clean-Mac Gatekeeper verification are release checklist items, not implied claims.
+This is beta 5. Code compilation and automated tests are not substitutes for testing on every macOS version. The Intel slice is cross-built; real Intel-machine verification and clean-Mac Gatekeeper verification are release checklist items, not implied claims.
 
 The interface is English by default. **Keepelix › Language › עברית** switches the whole app to Hebrew with right-to-left layout on the next launch (the choice is stored for this app only). Contributions to accessibility, localisation and synthetic-fixture coverage are welcome. See [CONTRIBUTING](CONTRIBUTING.md), [SECURITY](SECURITY.md), and [CHANGELOG](CHANGELOG.md).
 

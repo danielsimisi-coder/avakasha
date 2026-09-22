@@ -1,5 +1,7 @@
 import Cocoa
 import Quartz
+import AVKit
+import ImageIO
 import KeepelixCore
 
 /// Interface language. English by default; Hebrew is an explicit choice in Keepelix › Language and applies on the next launch.
@@ -54,6 +56,17 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     let ageHint = NSTextField(labelWithString:L("Based on last modification — age alone does not mean a file is unused.","לפי השינוי האחרון — גיל הקובץ לא מעיד בהכרח שלא השתמשת בו."))
     let status = NSTextField(labelWithString: "")
     let selectionLabel = NSTextField(labelWithString: "")
+    let pathLabel = NSTextField(labelWithString: "")
+    let kindBadge = NSTextField(labelWithString: "")
+    var videoPlayer: AVPlayerView!
+    var videoHost: NSStackView!
+    let playButton = NSButton()
+    let muteButton = NSButton()
+    let timeSlider = NSSlider()
+    let timeLabel = NSTextField(labelWithString: "0:00 / 0:00")
+    var timeObserver: Any?
+    var scrubbing = false
+    var mediaInfoGeneration = 0
     let folderLabel = NSTextField(labelWithString: "")
     let spinner = NSProgressIndicator()
     var emptyList: NSStackView!
@@ -95,7 +108,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         window = NSWindow(contentRect:NSRect(x:0,y:0,width:1320,height:820),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
-        window.delegate=self; window.title="Keepelix · 0.1.0 beta 4"
+        window.delegate=self; window.title="Keepelix · 0.1.0 beta 5"
         window.minSize=NSSize(width:1120,height:720);window.center();window.titlebarAppearsTransparent=true
         func label(_ text:String,_ size:CGFloat,_ weight:NSFont.Weight = .regular,_ secondary:Bool = false)->NSTextField {
             let v=NSTextField(labelWithString:text);v.font = .systemFont(ofSize:size,weight:weight);v.textColor=secondary ? .secondaryLabelColor : .labelColor;return v
@@ -167,7 +180,19 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         scroll.documentView=table
         primary=QLPreviewView(frame:NSRect(x:0,y:0,width:330,height:440),style:.normal);primary.autostarts=false
         comparison=QLPreviewView(frame:NSRect(x:0,y:0,width:330,height:440),style:.normal);comparison.autostarts=false
-        let previews=row([primary,comparison],8);previews.distribution = .fillEqually
+        // AVKit hides its own controls when the pointer leaves the video, so the transport bar below is drawn by Keepelix and always visible.
+        videoPlayer=AVPlayerView(frame:NSRect(x:0,y:0,width:330,height:400));videoPlayer.controlsStyle = .none;videoPlayer.setAccessibilityLabel(L("Video","וידאו"))
+        for (b,symbol,action,labelEn,labelHe) in [(playButton,"play.fill",#selector(togglePlayback),"Play","נגן"),(muteButton,"speaker.wave.2.fill",#selector(toggleMute),"Mute","השתק")] {
+            b.bezelStyle = .rounded;b.image=NSImage(systemSymbolName:symbol,accessibilityDescription:L(labelEn,labelHe));b.imagePosition = .imageOnly;b.title="";b.target=self;b.action=action;b.setAccessibilityLabel(L(labelEn,labelHe))
+        }
+        timeSlider.minValue=0;timeSlider.maxValue=1;timeSlider.doubleValue=0;timeSlider.target=self;timeSlider.action = #selector(scrub(_:));timeSlider.isContinuous=true;timeSlider.setAccessibilityLabel(L("Playback position","מיקום הניגון"))
+        timeSlider.setContentHuggingPriority(.init(1),for:.horizontal)
+        timeLabel.font = .monospacedDigitSystemFont(ofSize:11,weight:.regular);timeLabel.textColor = .secondaryLabelColor
+        let transport=row([playButton,timeSlider,timeLabel,muteButton],8)
+        videoHost=column([videoPlayer,transport],8);videoHost.isHidden=true
+        videoPlayer.widthAnchor.constraint(equalTo:videoHost.widthAnchor).isActive=true;transport.widthAnchor.constraint(equalTo:videoHost.widthAnchor).isActive=true
+        videoPlayer.setContentHuggingPriority(.init(1),for:.vertical)
+        let previews=row([videoHost,primary,comparison],8);previews.distribution = .fillEqually
         let previewHost=NSView();previewHost.addSubview(previews);previews.translatesAutoresizingMaskIntoConstraints=false
         let previewIcon=NSImageView(image:NSImage(systemSymbolName:"doc.viewfinder",accessibilityDescription:nil)!);previewIcon.contentTintColor = .tertiaryLabelColor
         previewIcon.widthAnchor.constraint(equalToConstant:44).isActive=true;previewIcon.heightAnchor.constraint(equalToConstant:44).isActive=true
@@ -194,7 +219,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let all=button("Select all","בחר הכול","checkmark.circle",#selector(selectAllFiles))
         extrasButton=button("Select extra copies","בחר עותקים נוספים","checkmark.circle.badge.plus",#selector(selectExtras))
         selectionLabel.font = .systemFont(ofSize:12,weight:.medium);selectionLabel.textColor = .secondaryLabelColor
-        let selection=row([all,extrasButton,spacer(),selectionLabel],8)
+        pathLabel.font = .monospacedSystemFont(ofSize:11,weight:.regular);pathLabel.textColor = .secondaryLabelColor;pathLabel.lineBreakMode = .byTruncatingMiddle
+        pathLabel.setContentCompressionResistancePriority(.defaultLow,for:.horizontal);pathLabel.setContentHuggingPriority(.init(1),for:.horizontal);pathLabel.isSelectable=true
+        pathLabel.setAccessibilityLabel(L("Selected file path","נתיב הקובץ הנבחר"))
+        kindBadge.font = .systemFont(ofSize:10,weight:.semibold);kindBadge.wantsLayer=true;kindBadge.layer?.cornerRadius=5;kindBadge.alignment = .center
+        kindBadge.setContentHuggingPriority(.required,for:.horizontal);kindBadge.setContentCompressionResistancePriority(.required,for:.horizontal)
+        kindBadge.widthAnchor.constraint(greaterThanOrEqualToConstant:52).isActive=true;kindBadge.heightAnchor.constraint(equalToConstant:18).isActive=true;kindBadge.isHidden=true
+        kindBadge.setAccessibilityLabel(L("File type","סוג הקובץ"))
+        let selection=row([all,extrasButton,kindBadge,pathLabel,selectionLabel],10)
         let preview=button("Preview","תצוגה מקדימה","eye",#selector(togglePreview));preview.toolTip=L("Space to toggle preview","רווח לפתיחה וסגירה של תצוגה מקדימה")
         let next=button("Keep & next","השאר והמשך","arrow.right",#selector(nextFile))
         let trash=button("Move to Trash…","העבר לפח…","trash",#selector(trashSelection));trash.contentTintColor = .systemRed
@@ -239,6 +271,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
                 image.unlockFocus();let bitmap=NSBitmapImageRep(data:image.tiffRepresentation!)!;try bitmap.representation(using:.png,properties:[:])!.write(to:folder.appendingPathComponent(name))
             }
             try Data("Synthetic demo notes. These files were generated for the interface preview.".utf8).write(to:folder.appendingPathComponent("Weekend notes.txt"))
+            try Self.writeSyntheticVideo(to:folder.appendingPathComponent("Harbour clip.mov"))
             try FileManager.default.setAttributes([.modificationDate:Date(timeIntervalSince1970:1514764800)],ofItemAtPath:folder.appendingPathComponent("Weekend notes.txt").path)
             try FileManager.default.setAttributes([.modificationDate:Date(timeIntervalSince1970:1577836800)],ofItemAtPath:folder.appendingPathComponent("Mountain light.png").path)
             for (sub,size) in [("Trips/2019 Coast",640_000),("Trips/Mountains",280_000),("Exports",120_000),("Archive/Old phone",60_000)] {
@@ -248,13 +281,41 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             root=folder;files=try Scanner.scan(root:folder,token:CancellationToken()).files;sizeFilter.selectItem(at:0);applyFilters()
             folderLabel.stringValue=L("Example collection · generated demo files","אוסף לדוגמה · קבצים מלאכותיים")
             status.stringValue=L("Read-only demo · generated files only","הדגמה לקריאה בלבד · קבצים מלאכותיים בלבד")
-            if let row=shown.firstIndex(where:{$0.name == "Coastal morning.png"}) {table.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false);previewOpen=true;updatePreview()}
+            let featured = ProcessInfo.processInfo.arguments.contains("--demo-video") ? "Harbour clip.mov" : "Coastal morning.png"
+            if let row=shown.firstIndex(where:{$0.name == featured}) {table.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false);previewOpen=true;updatePreview()}
             if ProcessInfo.processInfo.arguments.contains("--demo-map") {
                 mapPanel.load(try StorageMapper.map(root:folder,token:CancellationToken()));mapRoot=folder;setMapMode(true)
                 folderLabel.stringValue=L("Example collection · generated demo files","אוסף לדוגמה · קבצים מלאכותיים")
                 status.stringValue=L("Read-only demo · generated files only","הדגמה לקריאה בלבד · קבצים מלאכותיים בלבד")
             }
         } catch {show(L("Demo unavailable","ההדגמה אינה זמינה"),error.localizedDescription)}
+    }
+    /// Three seconds of generated colour bands, so screenshots never need a real recording.
+    static func writeSyntheticVideo(to url:URL) throws {
+        let width=640,height=360,frames=72
+        let writer=try AVAssetWriter(outputURL:url,fileType:.mov)
+        let input=AVAssetWriterInput(mediaType:.video,outputSettings:[AVVideoCodecKey:AVVideoCodecType.h264,AVVideoWidthKey:width,AVVideoHeightKey:height])
+        let adaptor=AVAssetWriterInputPixelBufferAdaptor(assetWriterInput:input,sourcePixelBufferAttributes:[kCVPixelBufferPixelFormatTypeKey as String:kCVPixelFormatType_32ARGB,kCVPixelBufferWidthKey as String:width,kCVPixelBufferHeightKey as String:height])
+        writer.add(input);guard writer.startWriting() else { throw writer.error ?? NSError(domain:"Keepelix",code:4) }
+        writer.startSession(atSourceTime:.zero)
+        for frame in 0..<frames {
+            while !input.isReadyForMoreMediaData { Thread.sleep(forTimeInterval:0.01) }
+            var buffer:CVPixelBuffer?
+            guard let pool=adaptor.pixelBufferPool, CVPixelBufferPoolCreatePixelBuffer(nil,pool,&buffer) == kCVReturnSuccess, let pixels=buffer else { throw NSError(domain:"Keepelix",code:5) }
+            CVPixelBufferLockBaseAddress(pixels,[])
+            if let context=CGContext(data:CVPixelBufferGetBaseAddress(pixels),width:width,height:height,bitsPerComponent:8,bytesPerRow:CVPixelBufferGetBytesPerRow(pixels),space:CGColorSpaceCreateDeviceRGB(),bitmapInfo:CGImageAlphaInfo.noneSkipFirst.rawValue) {
+                let shift=CGFloat(frame)/CGFloat(frames)
+                for band in 0..<6 {
+                    context.setFillColor(CGColor(red:0.1+0.12*CGFloat(band),green:0.35+0.4*abs(sin(Double(band)+Double(shift)*6.28)),blue:0.45,alpha:1))
+                    context.fill(CGRect(x:0,y:CGFloat(band)*CGFloat(height)/6,width:CGFloat(width),height:CGFloat(height)/6))
+                }
+                context.setFillColor(CGColor(red:0.99,green:0.77,blue:0.44,alpha:1));context.fillEllipse(in:CGRect(x:60+shift*460,y:220,width:80,height:80))
+            }
+            CVPixelBufferUnlockBaseAddress(pixels,[])
+            adaptor.append(pixels,withPresentationTime:CMTime(value:CMTimeValue(frame),timescale:24))
+        }
+        input.markAsFinished();let done=DispatchSemaphore(value:0);writer.finishWriting{done.signal()};done.wait()
+        if writer.status != .completed { throw writer.error ?? NSError(domain:"Keepelix",code:6) }
     }
     func applicationWillTerminate(_ notification:Notification) {
         if let demoFolder=demoFolder {try? FileManager.default.removeItem(at:demoFolder);preferences.removePersistentDomain(forName:"Keepelix.SyntheticDemo")}
@@ -320,7 +381,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         }
         return true
     }
-    @objc func aboutApp() { show(L("Keepelix 0.1.0 beta 4", "Keepelix 0.1.0 בטא 4"), "© 2026 Daniel Siman Tov\n" + L("Contact: ","יצירת קשר: ") + "daniel.simisi@gmail.com\n\n" + L("Offline file review. MIT license. Not affiliated with WhatsApp or Meta. Undo is available for this app session; Finder Trash remains available afterward.","סקירת קבצים מקומית. רישיון MIT. ללא שיוך ל־WhatsApp או Meta. שחזור באפליקציה זמין במהלך ההפעלה הנוכחית; הפח של Finder נשאר זמין לאחר מכן.")) }
+    @objc func aboutApp() { show(L("Keepelix 0.1.0 beta 5", "Keepelix 0.1.0 בטא 5"), "© 2026 Daniel Siman Tov\n" + L("Contact: ","יצירת קשר: ") + "daniel.simisi@gmail.com\n\n" + L("Offline file review. MIT license. Not affiliated with WhatsApp or Meta. Undo is available for this app session; Finder Trash remains available afterward.","סקירת קבצים מקומית. רישיון MIT. ללא שיוך ל־WhatsApp או Meta. שחזור באפליקציה זמין במהלך ההפעלה הנוכחית; הפח של Finder נשאר זמין לאחר מכן.")) }
     func show(_ title: String, _ detail: String) {
         if smokeMode { print("Alert suppressed in smoke mode: \(title) — \(detail)"); return }
         let a=NSAlert();a.messageText=title;a.informativeText=detail;a.runModal()
@@ -416,8 +477,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         do { activateRoot(try FileSafety.root(url)) } catch { show(L("Cannot scan this folder","לא ניתן לסרוק את התיקייה"),error.localizedDescription);return }
         if mapMode { setMapMode(false) }
         let selectedRoot=root!;preferences.set(selectedRoot.path,forKey:"lastFolder");folderLabel.stringValue=selectedRoot.path;updateLocationHighlight()
-        primary.previewItem=nil;comparison.previewItem=nil;files=[];exact=[];similar=[];guards=[:];mode.selectItem(at:0);modeChanged()
-        token=CancellationToken();let jobToken=token;setBusy(true);status.stringValue=L("Scanning file metadata…","סורק שמות וגדלים…")
+        primary.previewItem=nil;comparison.previewItem=nil;stopVideo();files=[];exact=[];similar=[];guards=[:];mode.selectItem(at:0);modeChanged()
+        token=CancellationToken();let jobToken=token;setBusy(true);refreshEmptyState();status.stringValue=L("Scanning file metadata…","סורק שמות וגדלים…")
         work.async {
             do {
                 let result=try Scanner.scan(root:selectedRoot,token:jobToken){count in DispatchQueue.main.async{self.status.stringValue=L("Scanning: ","נסרקו: ")+String(count)}}
@@ -440,7 +501,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         mapButton.image = NSImage(systemSymbolName: on ? "list.bullet" : "chart.pie",accessibilityDescription:nil);mapButton.setAccessibilityLabel(mapButton.title)
         if on {
             if !demoMode { folderLabel.stringValue = mapRoot?.path ?? folderLabel.stringValue }
-            primary.previewItem=nil;comparison.previewItem=nil;previewPlaceholder.isHidden=true;primary.isHidden=true;comparison.isHidden=true
+            primary.previewItem=nil;comparison.previewItem=nil;stopVideo();previewPlaceholder.isHidden=true;primary.isHidden=true;comparison.isHidden=true
         } else {
             if !demoMode { folderLabel.stringValue = root?.path ?? L("Choose a location from the sidebar to begin","בחר מיקום מהסרגל הצדדי כדי להתחיל") }
             ageHint.isHidden = mode.indexOfSelectedItem != 3;comparison.isHidden = !(mode.indexOfSelectedItem == 1 || mode.indexOfSelectedItem == 2);updateSelection()
@@ -560,16 +621,49 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         if tableColumn?.identifier.rawValue == "modified" { v.font = .systemFont(ofSize:12);v.textColor = .secondaryLabelColor }
         guard tableColumn?.identifier.rawValue == "name" else { return v }
         let symbols:[FileKind:String]=[.image:"photo",.video:"film",.audio:"waveform",.document:"doc.text",.archive:"archivebox",.other:"doc"]
-        let icon=NSImageView(image:NSImage(systemSymbolName:symbols[f.kind] ?? "doc",accessibilityDescription:nil)!);icon.contentTintColor = .secondaryLabelColor
+        let icon=NSImageView(image:NSImage(systemSymbolName:symbols[f.kind] ?? "doc",accessibilityDescription:Self.kindTitle(f.kind))!);icon.contentTintColor = Self.kindColor(f.kind)
         icon.widthAnchor.constraint(equalToConstant:18).isActive=true;icon.heightAnchor.constraint(equalToConstant:18).isActive=true
         let cell=NSStackView(views:[icon,v]);cell.spacing=9;cell.toolTip=f.url.path;return cell
     }
     func tableViewSelectionDidChange(_ notification:Notification){updateSelection()}
     func updateSelection(){
-        let chosen=selectedFiles;selectionLabel.stringValue="\(chosen.count) / \(shown.count) " + L("selected","נבחרו") + " · " + bytes(chosen.reduce(0){$0+$1.allocatedBytes})
+        let chosen=selectedFiles
+        if chosen.isEmpty { selectionLabel.stringValue="\(shown.count) " + L("items","פריטים") }
+        else { selectionLabel.stringValue=L("Item ","פריט ")+"\(table.selectedRowIndexes.first!+1)"+L(" of ","  מתוך ")+"\(shown.count) · \(chosen.count) "+L("selected","נבחרו")+" · "+bytes(chosen.reduce(0){$0+$1.allocatedBytes}) }
+        pathLabel.stringValue = chosen.first.map{ displayPath($0.url) } ?? "";pathLabel.toolTip = chosen.first?.url.path
+        updateKindBadge(chosen.first)
         refreshEmptyState()
         if let f=chosen.first{preferences.set(f.id,forKey:"lastFile")};updatePreview();updateEnabled()
     }
+    static func kindTitle(_ kind:FileKind) -> String {
+        switch kind {case .image:return L("Image","תמונה");case .video:return L("Video","וידאו");case .audio:return L("Audio","שמע");case .document:return L("Document","מסמך");case .archive:return L("Archive","ארכיון");case .other:return L("File","קובץ")}
+    }
+    static func kindColor(_ kind:FileKind) -> NSColor {
+        switch kind {case .video:return .systemPurple;case .image:return .systemTeal;case .audio:return .systemOrange;default:return .secondaryLabelColor}
+    }
+    /// Shows the type at a glance; adds pixel size for images and duration for videos (metadata only, read locally).
+    func updateKindBadge(_ file:FileRecord?) {
+        mediaInfoGeneration += 1;let generation=mediaInfoGeneration
+        guard let f=file else { kindBadge.isHidden=true;return }
+        func show(_ text:String) { kindBadge.stringValue="  "+text+"  ";kindBadge.textColor=Self.kindColor(f.kind);kindBadge.layer?.backgroundColor=Self.kindColor(f.kind).withAlphaComponent(0.16).cgColor;kindBadge.isHidden=false }
+        show(Self.kindTitle(f.kind).uppercased())
+        if f.kind == .image, let source=CGImageSourceCreateWithURL(f.url as CFURL,[kCGImageSourceShouldCache:false] as CFDictionary),
+           let properties=CGImageSourceCopyPropertiesAtIndex(source,0,nil) as? [CFString:Any],
+           let w=properties[kCGImagePropertyPixelWidth] as? NSNumber,let h=properties[kCGImagePropertyPixelHeight] as? NSNumber {
+            show(Self.kindTitle(f.kind).uppercased()+" · \(w.intValue)×\(h.intValue)")
+        }
+        if f.kind == .video {
+            let asset=AVURLAsset(url:f.url)
+            Task { @MainActor in
+                guard let duration=try? await asset.load(.duration), generation == self.mediaInfoGeneration else { return }
+                let seconds=CMTimeGetSeconds(duration);guard seconds.isFinite else { return }
+                let total=Int(seconds.rounded());let clock = total >= 3600 ? String(format:"%d:%02d:%02d",total/3600,total%3600/60,total%60) : String(format:"%d:%02d",total/60,total%60)
+                show(Self.kindTitle(f.kind).uppercased()+" · "+clock)
+            }
+        }
+    }
+    /// Home folder shown as ~ so long paths stay readable; the tooltip keeps the full path.
+    func displayPath(_ url:URL) -> String { (url.path as NSString).abbreviatingWithTildeInPath }
     @objc func selectAllCommand(){
         if let text = window.firstResponder as? NSTextView { text.selectAll(nil) } else { selectAllFiles() }
     }
@@ -579,12 +673,56 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     @objc func deselect(){guard !busy,!mapMode else{return};guards=[:];table.deselectAll(nil);updateSelection()}
     @objc func nextFile(){guard !busy,!shown.isEmpty else{return};let i=min(max(table.selectedRow+1,0),shown.count-1);table.selectRowIndexes(IndexSet(integer:i),byExtendingSelection:false);table.scrollRowToVisible(i);window.makeFirstResponder(table)}
     @objc func togglePreview(){guard !busy else{return};previewOpen.toggle();updatePreview();window.makeFirstResponder(table)}
+    func stopVideo(){
+        if let observer=timeObserver { videoPlayer?.player?.removeTimeObserver(observer);timeObserver=nil }
+        videoPlayer?.player?.pause();videoPlayer?.player=nil;videoHost?.isHidden=true
+        playButton.image=NSImage(systemSymbolName:"play.fill",accessibilityDescription:L("Play","נגן"));timeSlider.doubleValue=0;timeLabel.stringValue="0:00 / 0:00"
+    }
+    static func clock(_ seconds:Double) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "0:00" }
+        let total=Int(seconds.rounded());return total >= 3600 ? String(format:"%d:%02d:%02d",total/3600,total%3600/60,total%60) : String(format:"%d:%02d",total/60,total%60)
+    }
+    func startVideo(_ url:URL) {
+        let player=AVPlayer(url:url);player.actionAtItemEnd = .pause;videoPlayer.player=player;videoHost.isHidden=false
+        muteButton.image=NSImage(systemSymbolName:player.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",accessibilityDescription:nil)
+        timeObserver=player.addPeriodicTimeObserver(forInterval:CMTime(value:1,timescale:4),queue:.main) { [weak self] time in
+            guard let self=self, let item=player.currentItem else { return }
+            let duration=CMTimeGetSeconds(item.duration), current=CMTimeGetSeconds(time)
+            if !self.scrubbing, duration.isFinite, duration > 0 { self.timeSlider.doubleValue=current/duration }
+            self.timeLabel.stringValue=Self.clock(current)+" / "+Self.clock(duration)
+            let playing = player.rate != 0
+            self.playButton.image=NSImage(systemSymbolName:playing ? "pause.fill" : "play.fill",accessibilityDescription:playing ? L("Pause","השהה") : L("Play","נגן"))
+        }
+    }
+    @objc func togglePlayback() {
+        guard let player=videoPlayer.player else { return }
+        if player.rate != 0 { player.pause() } else {
+            if let item=player.currentItem, CMTimeCompare(item.currentTime(),item.duration) >= 0 { player.seek(to:.zero) }
+            player.play()
+        }
+    }
+    @objc func toggleMute() {
+        guard let player=videoPlayer.player else { return };player.isMuted.toggle()
+        muteButton.image=NSImage(systemSymbolName:player.isMuted ? "speaker.slash.fill" : "speaker.wave.2.fill",accessibilityDescription:nil)
+    }
+    @objc func scrub(_ sender:NSSlider) {
+        guard let player=videoPlayer.player, let item=player.currentItem else { return }
+        let duration=CMTimeGetSeconds(item.duration);guard duration.isFinite else { return }
+        scrubbing = NSApp.currentEvent?.type == .leftMouseDragged
+        player.seek(to:CMTime(seconds:sender.doubleValue*duration,preferredTimescale:600),toleranceBefore:.zero,toleranceAfter:.zero)
+    }
+    /// Formats AVFoundation plays natively get an inline player with visible controls; everything else uses Quick Look.
+    static func playsInline(_ url:URL) -> Bool { ["mp4","m4v","mov"].contains(url.pathExtension.lowercased()) }
     func updatePreview(){
-        primary?.previewItem=nil;comparison?.previewItem=nil
+        primary?.previewItem=nil;comparison?.previewItem=nil;stopVideo()
         previewPlaceholder?.isHidden = false;primary?.isHidden = true
         guard !busy,!mapMode,previewOpen,let f=selectedFiles.first,let root=root,(try? FileSafety.validate(f,root:root)) != nil else{return}
-        previewPlaceholder?.isHidden = true;primary.isHidden = false
-        primary.previewItem=f.url as NSURL
+        previewPlaceholder?.isHidden = true
+        if f.kind == .video, Self.playsInline(f.url) {
+            startVideo(f.url) // paused until you press play
+        } else {
+            primary.isHidden = false;primary.previewItem=f.url as NSURL
+        }
         if (mode.indexOfSelectedItem == 1 || mode.indexOfSelectedItem == 2), let group=currentGroups.first(where:{$0.members.contains(where:{$0.id==f.id})}),let other=(mode.indexOfSelectedItem == 2 && f.id != group.anchor.id ? group.anchor : group.members.first(where:{$0.id != f.id})),(try? FileSafety.validate(other,root:root)) != nil{comparison.previewItem=other.url as NSURL}
     }
     @objc func reveal(){guard !busy,contextRow>=0,contextRow<shown.count,let root=root else{return};let f=shown[contextRow];do{try FileSafety.validate(f,root:root);NSWorkspace.shared.activateFileViewerSelecting([f.url])}catch{show(L("File unavailable","הקובץ אינו זמין"),error.localizedDescription)}}
@@ -594,7 +732,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     func runAnalysis(similar:Bool){
         guard !busy,let root=root,!files.isEmpty else{return}
-        token=CancellationToken();let jobToken=token;let source=files;setBusy(true);primary.previewItem=nil;comparison.previewItem=nil
+        token=CancellationToken();let jobToken=token;let source=files;setBusy(true);primary.previewItem=nil;comparison.previewItem=nil;stopVideo()
         work.async{
             do{
                 let progress:(Int,Int)->Void={i,total in if i%25==0 || i==total{DispatchQueue.main.async{self.status.stringValue="\(i) / \(total)"}}}
@@ -637,7 +775,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             guard alert.runModal() == .alertFirstButtonReturn else{return}
             if alert.suppressionButton?.state == .on {preferences.set(true,forKey:"skipTrashConfirmation");confirmationMenuItem?.state = .off}
         }
-        let keepers=guards;let row=table.selectedRow;setBusy(true);cancelButton.isEnabled=false;primary.previewItem=nil;comparison.previewItem=nil
+        let keepers=guards;let row=table.selectedRow;setBusy(true);cancelButton.isEnabled=false;primary.previewItem=nil;comparison.previewItem=nil;stopVideo()
         work.async {
             let result=self.history.move(chosen,root:root,keepers:keepers,backend:self.trashBackend)
             DispatchQueue.main.async {self.finishMove(result,nextRow:row)}
@@ -734,6 +872,18 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             mode.selectItem(at:0);modeChanged();selectAllFiles();deselect()
             table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false)
             togglePreview();precondition(primary.previewItem != nil)
+            precondition(pathLabel.stringValue == displayPath(selectedFiles[0].url) && pathLabel.toolTip == selectedFiles[0].url.path,"The selected file's path must be shown")
+            precondition(!kindBadge.isHidden && kindBadge.stringValue.contains(Self.kindTitle(.document).uppercased()) && videoHost.isHidden,"Text files show a document badge and no player")
+            precondition(selectionLabel.stringValue.hasPrefix(L("Item ","פריט ")+"1"+L(" of ","  מתוך ")+"\(shown.count)"),"Position counter: \(selectionLabel.stringValue)")
+            let clip=temp.appendingPathComponent("Synthetic clip.mov");try Self.writeSyntheticVideo(to:clip);files.append(try FileRecord(url:clip));applyFilters()
+            table.selectRowIndexes(IndexSet(integer:shown.firstIndex{$0.url.lastPathComponent == "Synthetic clip.mov"}!),byExtendingSelection:false)
+            precondition(!videoHost.isHidden && videoPlayer.player != nil && videoPlayer.player?.rate == 0 && primary.isHidden,"Videos open in the inline player, paused")
+            togglePlayback();precondition(videoPlayer.player?.rate != 0);togglePlayback();precondition(videoPlayer.player?.rate == 0)
+            toggleMute();precondition(videoPlayer.player?.isMuted == true);toggleMute()
+            togglePreview();precondition(videoHost.isHidden && videoPlayer.player == nil,"Closing the preview releases the video");togglePreview()
+            files.removeAll{$0.url == clip};try FileManager.default.removeItem(at:clip);applyFilters()
+            precondition(Self.playsInline(URL(fileURLWithPath:"/x/clip.MOV")) && !Self.playsInline(URL(fileURLWithPath:"/x/clip.mkv")))
+            deselect();precondition(pathLabel.stringValue.isEmpty);table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false)
             nextFile();precondition(table.selectedRow == 1 && primary.previewItem != nil)
             togglePreview();precondition(primary.previewItem == nil)
             let oldURL=temp.appendingPathComponent("old-sample.txt")
