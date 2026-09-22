@@ -7,4 +7,6 @@ All fixtures are generated temporary files. No personal media, WhatsApp database
 - Independent Codex review found selection and concurrent-change issues; fixes and regression tests followed. External GLM review was not used. This is not a claim that the full external-review workflow passed.
 - GitHub CI runs tests, hidden smoke, release compilation and the tracked-source audit.
 
-The initial release is a private, ad-hoc-signed beta. Developer ID signing, notarization, Gatekeeper acceptance on a clean Mac, Intel runtime testing and broad accessibility testing remain release gates for a public supported distribution. Unit tests use an injectable Trash backend; real Finder Trash integration still needs dedicated acceptance on a disposable user account.
+The initial release is a private, ad-hoc-signed beta. Developer ID signing, notarization, Gatekeeper acceptance on a clean Mac, Intel runtime testing and broad accessibility testing remain release gates for a public supported distribution. The optional real macOS Trash/Undo integration test passed locally using one generated disposable file. Wider filesystem and permission combinations still need dedicated acceptance.
+
+Local evidence: 20 core cases and the hidden UI smoke passed; an additional opt-in macOS Trash round-trip passed. Enable it with `FILETRIAGE_SYSTEM_TRASH_TEST=1 swift test`. Default CI skips that OS-integration case.

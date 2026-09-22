@@ -38,6 +38,16 @@ final class CoreTests: XCTestCase {
         _ = try file("a.txt");let token=CancellationToken();token.cancel()
         XCTAssertTrue(try Scanner.scan(root:root,token:token).cancelled)
     }
+    func testSystemTrashRoundTripWithOwnedSyntheticFile()throws {
+        try XCTSkipUnless(ProcessInfo.processInfo.environment["FILETRIAGE_SYSTEM_TRASH_TEST"] == "1", "Opt-in integration test; uses only this test's generated file")
+        let a=try file("FileTriage-synthetic-"+UUID().uuidString+".txt","Disposable FileTriage integration fixture")
+        let result=TrashService.move([a],root:root)
+        XCTAssertTrue(result.failures.isEmpty, result.failures.map(\.message).joined(separator:"; "))
+        XCTAssertEqual(result.tickets.count,1)
+        let restored=TrashService.undo(result.tickets,root:root)
+        XCTAssertTrue(restored.failures.isEmpty);XCTAssertEqual(restored.restored,[a.url])
+        XCTAssertEqual(try String(contentsOf:a.url),"Disposable FileTriage integration fixture")
+    }
     func testChangedFileIsNotMoved()throws{
         let r=try file("changed.txt");try Data("new bytes".utf8).write(to:r.url)
         let result=TrashService.move([r],root:root,backend:FakeTrash(directory:trash))
