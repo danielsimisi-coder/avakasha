@@ -1,6 +1,11 @@
 # Changelog
 
+## 0.1.0-beta.7
+
+- The selected file's path and the map's folder path are links: underline on hover, click shows the item in Finder.
+
 ## 0.1.0-beta.6
+
 
 - Chat filter lists every WhatsApp chat found in the scan, largest first, by identifier.
 - **Stop auto-download…** opens WhatsApp and shows the path to its media auto-download setting (no public deep link exists).

@@ -55,7 +55,7 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
     let detail = NSStackView()
     private let detailTitle = NSTextField(wrappingLabelWithString: "")
     private let detailSize = NSTextField(labelWithString: "")
-    private let detailPath = NSTextField(wrappingLabelWithString: "")
+    private let detailPath = PathLink()
     private let detailFacts = NSTextField(wrappingLabelWithString: "")
     private let detailNotes = NSTextField(wrappingLabelWithString: "")
     private let caveat = NSTextField(wrappingLabelWithString: L("Sizes are space allocated on disk. Hard links, APFS clones, snapshots and cloud placeholders mean moving files to Trash may free a different amount.", "הגדלים הם המקום שמוקצה בדיסק. קישורים קשיחים, שכפולי APFS, תמונות מצב וקבצי ענן שלא הורדו גורמים לכך שהעברה לפח עשויה לפנות כמות שונה."))
@@ -102,8 +102,8 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         table.doubleAction = #selector(openSelected); table.target = self
 
         detailTitle.font = .systemFont(ofSize: 17, weight: .medium); detailTitle.maximumNumberOfLines = 3
-        detailPath.font = .monospacedSystemFont(ofSize: 11, weight: .regular); detailPath.textColor = .secondaryLabelColor; detailPath.maximumNumberOfLines = 3; detailPath.lineBreakMode = .byTruncatingMiddle; detailPath.isSelectable = true
-        detailPath.setAccessibilityLabel(L("Folder path", "נתיב התיקייה"))
+        detailPath.maximumNumberOfLines = 2; detailPath.setAccessibilityLabel(L("Folder path · click to show in Finder", "נתיב התיקייה · לחיצה מציגה ב־Finder"))
+        detailPath.onOpen = { [weak self] in guard let self = self, let node = self.selectedRow?.node ?? self.current else { return }; self.onReveal?(node.url) }
         detailSize.font = .monospacedDigitSystemFont(ofSize: 28, weight: .semibold)
         detailFacts.font = .systemFont(ofSize: 12); detailFacts.textColor = .secondaryLabelColor
         detailNotes.font = .systemFont(ofSize: 12); detailNotes.textColor = .systemOrange

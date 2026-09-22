@@ -62,7 +62,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     let ageHint = NSTextField(labelWithString:L("Based on last modification — age alone does not mean a file is unused.","לפי השינוי האחרון — גיל הקובץ לא מעיד בהכרח שלא השתמשת בו."))
     let status = NSTextField(labelWithString: "")
     let selectionLabel = NSTextField(labelWithString: "")
-    let pathLabel = NSTextField(labelWithString: "")
+    let pathLabel = PathLink()
     let kindBadge = NSTextField(labelWithString: "")
     var videoPlayer: AVPlayerView!
     var videoHost: NSStackView!
@@ -114,7 +114,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         window = NSWindow(contentRect:NSRect(x:0,y:0,width:1320,height:820),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
-        window.delegate=self; window.title="Keepelix · 0.1.0 beta 6"
+        window.delegate=self; window.title="Keepelix · 0.1.0 beta 7"
         window.minSize=NSSize(width:1120,height:720);window.center();window.titlebarAppearsTransparent=true
         func label(_ text:String,_ size:CGFloat,_ weight:NSFont.Weight = .regular,_ secondary:Bool = false)->NSTextField {
             let v=NSTextField(labelWithString:text);v.font = .systemFont(ofSize:size,weight:weight);v.textColor=secondary ? .secondaryLabelColor : .labelColor;return v
@@ -232,9 +232,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let all=button("Select all","בחר הכול","checkmark.circle",#selector(selectAllFiles))
         extrasButton=button("Select extra copies","בחר עותקים נוספים","checkmark.circle.badge.plus",#selector(selectExtras))
         selectionLabel.font = .systemFont(ofSize:12,weight:.medium);selectionLabel.textColor = .secondaryLabelColor
-        pathLabel.font = .monospacedSystemFont(ofSize:11,weight:.regular);pathLabel.textColor = .secondaryLabelColor;pathLabel.lineBreakMode = .byTruncatingMiddle
-        pathLabel.setContentCompressionResistancePriority(.defaultLow,for:.horizontal);pathLabel.setContentHuggingPriority(.init(1),for:.horizontal);pathLabel.isSelectable=true
-        pathLabel.setAccessibilityLabel(L("Selected file path","נתיב הקובץ הנבחר"))
+        pathLabel.setContentCompressionResistancePriority(.defaultLow,for:.horizontal);pathLabel.setContentHuggingPriority(.init(1),for:.horizontal)
+        pathLabel.setAccessibilityLabel(L("Selected file path · click to show in Finder","נתיב הקובץ הנבחר · לחיצה מציגה ב־Finder"))
+        pathLabel.onOpen={[weak self] in self?.revealFocusedFile()}
         kindBadge.font = .systemFont(ofSize:10,weight:.semibold);kindBadge.wantsLayer=true;kindBadge.layer?.cornerRadius=5;kindBadge.alignment = .center
         kindBadge.setContentHuggingPriority(.required,for:.horizontal);kindBadge.setContentCompressionResistancePriority(.required,for:.horizontal)
         kindBadge.widthAnchor.constraint(greaterThanOrEqualToConstant:52).isActive=true;kindBadge.heightAnchor.constraint(equalToConstant:18).isActive=true;kindBadge.isHidden=true
@@ -395,7 +395,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         }
         return true
     }
-    @objc func aboutApp() { show(L("Keepelix 0.1.0 beta 6", "Keepelix 0.1.0 בטא 6"), "© 2026 Daniel Siman Tov\n" + L("Contact: ","יצירת קשר: ") + "daniel.simisi@gmail.com\n\n" + L("Offline file review. MIT license. Not affiliated with WhatsApp or Meta. Undo is available for this app session; Finder Trash remains available afterward.","סקירת קבצים מקומית. רישיון MIT. ללא שיוך ל־WhatsApp או Meta. שחזור באפליקציה זמין במהלך ההפעלה הנוכחית; הפח של Finder נשאר זמין לאחר מכן.")) }
+    @objc func aboutApp() { show(L("Keepelix 0.1.0 beta 7", "Keepelix 0.1.0 בטא 7"), "© 2026 Daniel Siman Tov\n" + L("Contact: ","יצירת קשר: ") + "daniel.simisi@gmail.com\n\n" + L("Offline file review. MIT license. Not affiliated with WhatsApp or Meta. Undo is available for this app session; Finder Trash remains available afterward.","סקירת קבצים מקומית. רישיון MIT. ללא שיוך ל־WhatsApp או Meta. שחזור באפליקציה זמין במהלך ההפעלה הנוכחית; הפח של Finder נשאר זמין לאחר מכן.")) }
     func show(_ title: String, _ detail: String) {
         if smokeMode { print("Alert suppressed in smoke mode: \(title) — \(detail)"); return }
         let a=NSAlert();a.messageText=title;a.informativeText=detail;a.runModal()
@@ -759,6 +759,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             }
         }
     }
+    /// Opens the enclosing folder in Finder with the file selected, after the usual identity check.
+    func revealFocusedFile() {
+        guard !busy, let f=focusedFile, let root=root else { return }
+        do { try FileSafety.validate(f,root:root);NSWorkspace.shared.activateFileViewerSelecting([f.url]) } catch { show(L("File unavailable","הקובץ אינו זמין"),error.localizedDescription) }
+    }
     /// Home folder shown as ~ so long paths stay readable; the tooltip keeps the full path.
     func displayPath(_ url:URL) -> String { (url.path as NSString).abbreviatingWithTildeInPath }
     @objc func selectAllCommand(){
@@ -973,6 +978,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             togglePreview();precondition(primary.previewItem != nil)
             precondition(pathLabel.stringValue == displayPath(selectedFiles[0].url) && pathLabel.toolTip == selectedFiles[0].url.path,"The selected file's path must be shown")
             precondition((tableView(table,pasteboardWriterForRow:0) as? NSURL)?.path == shown[0].url.path,"Rows drag out as file URLs")
+            pathLabel.setHovered(true);precondition(pathLabel.isUnderlined && pathLabel.onOpen != nil,"The path underlines on hover and opens Finder on click");pathLabel.setHovered(false);precondition(!pathLabel.isUnderlined)
             precondition(tableView(table,pasteboardWriterForRow:99) == nil && chatFilter.isHidden)
             let chatFile=temp.appendingPathComponent("Media/12036301@g.us/clip.txt");try FileManager.default.createDirectory(at:chatFile.deletingLastPathComponent(),withIntermediateDirectories:true);try Data("g".utf8).write(to:chatFile)
             files.append(try FileRecord(url:chatFile));applyFilters();precondition(!chatFilter.isHidden,"Chat filter appears only when chat folders exist")

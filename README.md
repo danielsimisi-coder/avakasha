@@ -44,7 +44,7 @@ Sizes are space allocated on disk. Hard links, APFS clones, snapshots and cloud 
 
 ![File review with a Quick Look preview, generated demo files](assets/keepelix-preview.png)
 
-Videos in mp4, m4v or mov open in an inline player with controls that stay visible; other formats use Quick Look. The badge next to the path shows the type, image pixel size or video length, and the counter shows which item is highlighted out of the list.
+Videos in mp4, m4v or mov open in an inline player with controls that stay visible; other formats use Quick Look. The path is a link: hover underlines it and a click shows the file in Finder. The badge next to the path shows the type, image pixel size or video length, and the counter shows which item is highlighted out of the list.
 
 ![Inline video player with the type badge and path, generated demo files](assets/keepelix-video.png)
 
@@ -154,7 +154,7 @@ docs/                    Privacy, safety, release and contributor guidance
 
 ## Status and contribution
 
-This is beta 6. Code compilation and automated tests are not substitutes for testing on every macOS version. The Intel slice is cross-built; real Intel-machine verification and clean-Mac Gatekeeper verification are release checklist items, not implied claims.
+This is beta 7. Code compilation and automated tests are not substitutes for testing on every macOS version. The Intel slice is cross-built; real Intel-machine verification and clean-Mac Gatekeeper verification are release checklist items, not implied claims.
 
 The interface is English by default. **Keepelix › Language › עברית** switches the whole app to Hebrew with right-to-left layout on the next launch (the choice is stored for this app only). Contributions to accessibility, localisation and synthetic-fixture coverage are welcome. See [CONTRIBUTING](CONTRIBUTING.md), [SECURITY](SECURITY.md), and [CHANGELOG](CHANGELOG.md).
 
