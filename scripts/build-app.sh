@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-version="${VERSION:-0.1.0-beta.1}"
+version="${VERSION:-0.1.0-beta.2}"
 build_root="${BUILD_ROOT:-.build/distribution}"
 mkdir -p "$build_root" dist
 for arch in arm64 x86_64; do
@@ -23,7 +23,7 @@ strip -S "$app/Contents/MacOS/FileTriage"
 /usr/libexec/PlistBuddy -c 'Add :CFBundleName string FileTriage' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :CFBundlePackageType string APPL' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string ${version%%-*}" "$app/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c 'Add :CFBundleVersion string 1' "$app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleVersion string 2' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :LSMinimumSystemVersion string 13.0' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :NSHighResolutionCapable bool true' "$app/Contents/Info.plist"
 if [ -f assets/AppIcon.icns ]; then
@@ -37,6 +37,7 @@ else
   echo 'AD-HOC BUILD: not Developer ID signed or notarized. Do not label as notarized.'
 fi
 codesign --verify --strict "$app"
+"$app/Contents/MacOS/FileTriage" --launch-check
 archive="dist/FileTriage-$version-universal.zip"
 ditto --norsrc --noextattr -c -k --keepParent "$app" "$archive"
 if [ -n "${NOTARY_PROFILE:-}" ]; then

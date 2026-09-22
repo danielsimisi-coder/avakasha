@@ -18,3 +18,5 @@ The first independent pass led to these changes: filtering clears a vanished sel
 The primary preview follows the first selected row in display order. A multi-selection's last-clicked row is not separately tracked. This is a known interaction limitation; the confirmation lists every target independently of preview order.
 
 The final independent pass identified a mode-transition keeper-guard bug. Changing view mode now clears selection before clearing guards; the hidden UI regression exercises the exact transition. No additional independent pass was claimed after that fix. All 21 core/integration tests and the updated hidden UI regression passed locally.
+
+Beta 2 fixes a packaged-only startup crash: production now uses `UserDefaults.standard`, and packaging executes `--launch-check` inside the signed bundle using the production preferences path. This initializes the interface without opening a window or scanning files. CI now builds the universal package and runs this check plus the release payload audit.

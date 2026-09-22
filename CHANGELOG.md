@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-beta.2
+
+- Fix a startup crash in the packaged app by using the standard preferences domain.
+- Verify production preferences and interface initialization from the signed app bundle during packaging.
+
+
 ## 0.1.0-beta.1
 
 First standalone release of FileTriage, replacing the personal review prototype.

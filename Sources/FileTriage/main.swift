@@ -29,7 +29,14 @@ final class FileTable: NSTableView {
 
 final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSWindowDelegate {
     let smokeMode = ProcessInfo.processInfo.arguments.contains("--smoke-test")
-    let preferences = UserDefaults(suiteName: ProcessInfo.processInfo.arguments.contains("--smoke-test") ? "FileTriage.SyntheticSmoke" : "io.github.danielsimisi-coder.FileTriage")!
+    let preferences: UserDefaults = {
+        if ProcessInfo.processInfo.arguments.contains("--smoke-test") {
+            guard let isolated = UserDefaults(suiteName:"FileTriage.SyntheticSmoke") else { fatalError("Cannot create synthetic test preferences") }
+            return isolated
+        }
+        // A suite matching the app bundle identifier may return nil. Use the native app domain.
+        return .standard
+    }()
     var window: NSWindow!
     let table = FileTable()
     let search = NSSearchField()
@@ -64,7 +71,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     func applicationDidFinishLaunching(_ notification: Notification) {
         window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 900), styleMask: [.titled,.closable,.miniaturizable,.resizable], backing: .buffered, defer: false)
         window.delegate = self
-        window.title = "FileTriage · 0.1.0 beta"; window.minSize = NSSize(width: 1040, height: 780); window.center()
+        window.title = "FileTriage · 0.1.0 beta 2"; window.minSize = NSSize(width: 1040, height: 780); window.center()
         func button(_ en: String, _ he: String, _ action: Selector) -> NSButton {
             let b = NSButton(title: L(en, he), target: self, action: action); buttons.append(b); return b
         }
@@ -130,6 +137,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         makeMenus(); modeChanged(); updateEnabled()
         status.stringValue = L("Choose a folder to start. No folder is scanned automatically.","בחר תיקייה כדי להתחיל. הסריקה אינה מתחילה אוטומטית.")
         if smokeMode { runSmokeTests(); return }
+        if ProcessInfo.processInfo.arguments.contains("--launch-check") {
+            print("Packaged launch passed: production preferences and interface initialized; no scan started.")
+            fflush(stdout);exit(0)
+        }
         window.makeKeyAndOrderFront(nil); window.makeFirstResponder(table); NSApp.activate(ignoringOtherApps: true)
     }
     func makeMenus() {
@@ -145,7 +156,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         edit.submenu!.addItem(withTitle:"Paste",action:#selector(NSText.paste(_:)),keyEquivalent:"v")
         NSApp.mainMenu=main
     }
-    @objc func aboutApp() { show(L("FileTriage 0.1.0 beta", "FileTriage 0.1.0 בטא"), "© 2026 Daniel Siman Tov\n" + L("Contact: ","יצירת קשר: ") + "daniel.simisi@gmail.com\n\n" + L("Offline file review. MIT license. Not affiliated with WhatsApp or Meta. Undo is available for this app session; Finder Trash remains available afterward.","סקירת קבצים מקומית. רישיון MIT. ללא שיוך ל־WhatsApp או Meta. שחזור באפליקציה זמין במהלך ההפעלה הנוכחית; הפח של Finder נשאר זמין לאחר מכן.")) }
+    @objc func aboutApp() { show(L("FileTriage 0.1.0 beta 2", "FileTriage 0.1.0 בטא 2"), "© 2026 Daniel Siman Tov\n" + L("Contact: ","יצירת קשר: ") + "daniel.simisi@gmail.com\n\n" + L("Offline file review. MIT license. Not affiliated with WhatsApp or Meta. Undo is available for this app session; Finder Trash remains available afterward.","סקירת קבצים מקומית. רישיון MIT. ללא שיוך ל־WhatsApp או Meta. שחזור באפליקציה זמין במהלך ההפעלה הנוכחית; הפח של Finder נשאר זמין לאחר מכן.")) }
     func show(_ title: String, _ detail: String) { let a=NSAlert();a.messageText=title;a.informativeText=detail;a.runModal() }
     @objc func chooseFolder() {
         guard !busy else { return }; let p=NSOpenPanel();p.canChooseDirectories=true;p.canChooseFiles=false;p.allowsMultipleSelection=false
@@ -366,5 +377,5 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{true}
 }
-let app=NSApplication.shared;app.setActivationPolicy(ProcessInfo.processInfo.arguments.contains("--smoke-test") ? .prohibited : .regular)
+let app=NSApplication.shared;app.setActivationPolicy((ProcessInfo.processInfo.arguments.contains("--smoke-test") || ProcessInfo.processInfo.arguments.contains("--launch-check")) ? .prohibited : .regular)
 let controller=AppController();app.delegate=controller;app.run()
