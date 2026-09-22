@@ -604,7 +604,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let cutoff=Calendar.current.date(byAdding:.month,value:-months,to:Date()) ?? .distantPast
         var candidates=mode.indexOfSelectedItem == 3 ? ReviewQuery.older(files,than:cutoff) : files
         chatFilter.isHidden = !files.contains{ ChatFolders.kind(of:$0.url) != nil }
-        chatNamesButton?.isHidden = chatFilter.isHidden || chatNames.isEmpty == false || root.flatMap{ ChatDirectory.databaseURL(near:$0) } == nil
+        chatNamesButton?.isHidden = chatFilter.isHidden || !chatNames.isEmpty
         autoDownloadButton?.isHidden = chatFilter.isHidden
         if chatFilter.numberOfItems <= 4 { rebuildChatFilter() }
         if !chatFilter.isHidden {
@@ -649,7 +649,17 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     /// Explicit, read-only read of WhatsApp's chat list (identifier, name, type). Never messages; nothing is stored.
     func loadChatNames(confirmed:Bool) {
-        guard !busy, let root=root, let database=ChatDirectory.databaseURL(near:root) else { return }
+        guard !busy, let root=root else { return }
+        var database=ChatDirectory.databaseURL(near:root)
+        if database == nil {
+            guard !smokeMode else { return }
+            let p=NSOpenPanel();p.canChooseFiles=true;p.canChooseDirectories=false;p.allowsMultipleSelection=false;p.prompt=L("Use this list","השתמש ברשימה זו")
+            p.directoryURL=root.deletingLastPathComponent().deletingLastPathComponent()
+            p.message=L("WhatsApp's chat list (ChatStorage.sqlite) was not found near this folder. Locate it; it is usually in the WhatsApp group container. It will be opened read-only.","רשימת השיחות של ווטסאפ (ChatStorage.sqlite) לא נמצאה ליד התיקייה הזו. אתר אותה; בדרך כלל היא בקונטיינר של ווטסאפ. היא תיפתח לקריאה בלבד.")
+            guard p.runModal() == .OK, let chosen=p.url, chosen.lastPathComponent == ChatDirectory.databaseName else { return }
+            database=chosen
+        }
+        guard let database=database else { return }
         if !confirmed && !smokeMode {
             let a=NSAlert();a.messageText=L("Show chat names?","להציג שמות שיחות?")
             a.informativeText=L("Keepelix will open WhatsApp's local chat list read-only and read only each chat's identifier, display name and type, to label folders. Messages, contacts and media references are not read. Nothing is stored or sent anywhere. Close WhatsApp first if it reports the list as busy.","Keepelix תפתח את רשימת השיחות המקומית של ווטסאפ לקריאה בלבד ותקרא רק מזהה, שם תצוגה וסוג של כל שיחה, כדי לתייג תיקיות. הודעות, אנשי קשר והפניות למדיה לא נקראים. שום דבר לא נשמר ולא נשלח. אם הרשימה מדווחת כתפוסה, סגור את ווטסאפ קודם.")
@@ -664,7 +674,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
                 switch result {
                 case .success(let chats):
                     self.chatNames=chats;self.chatNamesSource=database;self.chatNamesButton.isHidden=true;self.mapPanel.chatNames=chats;self.rebuildChatFilter();self.applyFilters()
-                    self.status.stringValue="\(chats.count) "+L("chats named · read-only, nothing stored","שיחות עם שם · לקריאה בלבד, לא נשמר")
+                    let folders=Set(self.files.compactMap{ ChatDirectory.identifier(of:$0.url) });let matched=folders.filter{ chats[$0] != nil }.count
+                    self.status.stringValue="\(matched) / \(folders.count) "+L("chat folders named","תיקיות שיחה קיבלו שם")+" · \(chats.count) "+L("chats in the list · read-only, nothing stored","שיחות ברשימה · לקריאה בלבד, לא נשמר")
+                    if matched < folders.count { self.status.stringValue += " · "+L("unmatched folders keep their identifier","תיקיות ללא התאמה נשארות עם המזהה") }
                 case .failure(let error): self.show(L("Chat names unavailable","שמות שיחות אינם זמינים"),error.localizedDescription)
                 }
             }
@@ -983,12 +995,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             let chatFile=temp.appendingPathComponent("Media/12036301@g.us/clip.txt");try FileManager.default.createDirectory(at:chatFile.deletingLastPathComponent(),withIntermediateDirectories:true);try Data("g".utf8).write(to:chatFile)
             files.append(try FileRecord(url:chatFile));applyFilters();precondition(!chatFilter.isHidden,"Chat filter appears only when chat folders exist")
             chatFilter.selectItem(at:1);applyFilters();precondition(shown.count == 1 && shown[0].url.lastPathComponent == "clip.txt");chatFilter.selectItem(at:2);applyFilters();precondition(shown.isEmpty)
-            precondition(chatFilter.itemArray.contains{ ($0.representedObject as? String) == "12036301@g.us" } && chatNamesButton.isHidden,"Chats are listed by identifier; names need a database")
+            precondition(chatFilter.itemArray.contains{ ($0.representedObject as? String) == "12036301@g.us" } && !chatNamesButton.isHidden,"Chats are listed by identifier; names are offered on request")
             precondition(!autoDownloadButton.isHidden);openWhatsAppAutoDownload();precondition(status.stringValue.contains("auto-download") || status.stringValue.contains("אוטומטית"))
             var db:OpaquePointer?;precondition(sqlite3_open(temp.appendingPathComponent(ChatDirectory.databaseName).path,&db) == SQLITE_OK)
             precondition(sqlite3_exec(db,"CREATE TABLE ZWACHATSESSION (Z_PK INTEGER PRIMARY KEY, ZCONTACTJID TEXT, ZPARTNERNAME TEXT); INSERT INTO ZWACHATSESSION (ZCONTACTJID, ZPARTNERNAME) VALUES ('12036301@g.us','Synthetic hiking group')",nil,nil,nil) == SQLITE_OK);sqlite3_close(db)
             applyFilters();precondition(!chatNamesButton.isHidden,"Offer names once a chat list is found");loadChatNames(confirmed:true);settle()
-            precondition(chatNames["12036301@g.us"]?.name == "Synthetic hiking group" && chatNamesButton.isHidden)
+            precondition(chatNames["12036301@g.us"]?.name == "Synthetic hiking group" && chatNamesButton.isHidden && status.stringValue.hasPrefix("1 / 1"),status.stringValue)
             let named=chatFilter.itemArray.firstIndex{ $0.title.hasPrefix("Synthetic hiking group") }!;chatFilter.selectItem(at:named);applyFilters();precondition(shown.count == 1 && shown[0].url.lastPathComponent == "clip.txt","Filtering by a named chat")
             try FileManager.default.removeItem(at:temp.appendingPathComponent(ChatDirectory.databaseName))
             chatFilter.selectItem(at:0);files.removeAll{$0.url == chatFile};try FileManager.default.removeItem(at:temp.appendingPathComponent("Media"));applyFilters();precondition(chatFilter.isHidden)
