@@ -15,6 +15,7 @@ final class FileTable: NSTableView {
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 51 || event.keyCode == 117 { if !event.isARepeat {owner?.trashSelection()};return }
         if event.keyCode == 49 { if !event.isARepeat { owner?.spacePressed() }; return }
+        if event.keyCode == 1 && event.modifierFlags.intersection([.command,.control,.option]).isEmpty { if !event.isARepeat { owner?.toggleStar() }; return } // S
         if event.modifierFlags.contains(.command) {
             if event.keyCode == 0 { owner?.selectAllFiles(); return }
             if event.keyCode == 6 { if event.modifierFlags.contains(.shift) {owner?.redoTrash()}else{owner?.undoTrash()};return }
@@ -54,6 +55,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     let groupPicker = NSPopUpButton()
     let agePicker = NSPopUpButton()
     let chatFilter = NSPopUpButton()
+    let starFilter = NSPopUpButton()
+    /// Paths starred by the user. Stored in this app's preferences only; the files themselves are not touched.
+    var starred: Set<String> = []
     var chatNamesButton: NSButton!
     var autoDownloadButton: NSButton!
     var chatNames: [String: ChatInfo] = [:]
@@ -186,13 +190,17 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let similarButton=button("Compare images","השווה תמונות","photo.on.rectangle.angled",#selector(findSimilarImages))
         agePicker.addItems(withTitles:[L("Not modified in 6 months","לא שונו בחצי שנה"),L("Not modified in 1 year","לא שונו בשנה"),L("Not modified in 2 years","לא שונו בשנתיים"),L("Not modified in 5 years","לא שונו בחמש שנים")]);agePicker.selectItem(at:1);agePicker.target=self;agePicker.action = #selector(applyFilters)
         ageHint.font = .systemFont(ofSize:11);ageHint.textColor = .secondaryLabelColor
-        let analysis=row([mode,groupPicker,agePicker,chatNamesButton,autoDownloadButton,spacer(),exactButton,similarButton])
+        starFilter.addItems(withTitles:[L("★ All","★ הכול"),L("Starred only","עם כוכב בלבד"),L("Hide starred","ללא כוכב")]);starFilter.target=self;starFilter.action = #selector(applyFilters);starFilter.font = .systemFont(ofSize:12)
+        starFilter.setAccessibilityLabel(L("Star filter","סינון כוכב"));starFilter.toolTip=L("Star important files with S or the star column. Stars are kept by this app only; files are not changed.","סמן קבצים חשובים ב־S או בעמודת הכוכב. הכוכבים נשמרים באפליקציה בלבד; הקבצים לא משתנים.")
+        starred=Set(preferences.stringArray(forKey:"starredPaths") ?? [])
+        let analysis=row([mode,groupPicker,agePicker,starFilter,chatNamesButton,autoDownloadButton,spacer(),exactButton,similarButton])
         scroll=NSScrollView();scroll.hasVerticalScroller=true;scroll.hasHorizontalScroller=true;scroll.autohidesScrollers=true
         table.frame=NSRect(x:0,y:0,width:540,height:440);table.autoresizingMask=[.width];table.owner=self;table.delegate=self;table.dataSource=self
         table.setDraggingSourceOperationMask(.copy,forLocal:false) // dragging out copies; Keepelix never moves files without confirmation
         table.allowsMultipleSelection=true;table.rowHeight=38;table.intercellSpacing=NSSize(width:12,height:4);table.usesAlternatingRowBackgroundColors=false;table.style = .inset;table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
-        for (id,title,width) in [("name",L("Name","שם"),240.0),("size",L("On disk","בדיסק"),80.0),("modified",L("Last modified","שינוי אחרון"),100.0)] {
-            let c=NSTableColumn(identifier:NSUserInterfaceItemIdentifier(id));c.title=title;c.width=width;c.sortDescriptorPrototype=NSSortDescriptor(key:id,ascending:id != "size");table.addTableColumn(c)
+        for (id,title,width) in [("star","★",24.0),("name",L("Name","שם"),240.0),("size",L("On disk","בדיסק"),80.0),("modified",L("Last modified","שינוי אחרון"),100.0)] {
+            let c=NSTableColumn(identifier:NSUserInterfaceItemIdentifier(id));c.title=title;c.width=width;table.addTableColumn(c)
+            if id == "star" { c.minWidth=24;c.maxWidth=24;c.resizingMask=[] } else { c.sortDescriptorPrototype=NSSortDescriptor(key:id,ascending:id != "size") }
         }
         scroll.documentView=table
         primary=QLPreviewView(frame:NSRect(x:0,y:0,width:330,height:440),style:.normal);primary.autostarts=false
@@ -636,7 +644,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             if let identifier=chatFilter.selectedItem?.representedObject as? String { candidates=candidates.filter{ ChatDirectory.identifier(of:$0.url) == identifier } }
             else if chatFilter.indexOfSelectedItem > 0 && chatFilter.indexOfSelectedItem <= ChatKind.allCases.count { candidates=ChatFolders.filter(candidates,kind:ChatKind.allCases[chatFilter.indexOfSelectedItem-1]) }
         }
+        let starMode=starFilter.indexOfSelectedItem
         shown=candidates.filter { f in
+            (starMode == 0 || (starMode == 1) == starred.contains(f.id)) &&
             f.allocatedBytes>=threshold[max(0,sizeFilter.indexOfSelectedItem)] && (query.isEmpty || f.url.path.lowercased().contains(query)) &&
             (kindFilter.indexOfSelectedItem==0 || f.kind == FileKind.allCases[kindFilter.indexOfSelectedItem-1]) && (members==nil || members!.contains(f.id))
         }
@@ -741,6 +751,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     func numberOfRows(in tableView:NSTableView)->Int{shown.count}
     func tableView(_ tableView:NSTableView,viewFor tableColumn:NSTableColumn?,row:Int)->NSView?{
         let f=shown[row];let text:String
+        if tableColumn?.identifier.rawValue == "star" {
+            let on=starred.contains(f.id);let b=NSButton(image:NSImage(systemSymbolName:on ? "star.fill" : "star",accessibilityDescription:on ? L("Starred","עם כוכב") : L("Not starred","ללא כוכב"))!,target:self,action:#selector(starClicked(_:)))
+            b.isBordered=false;b.contentTintColor = on ? .systemYellow : .tertiaryLabelColor;b.tag=row;b.toolTip=L("Star this file (S)","סמן בכוכב (S)");b.setAccessibilityLabel(on ? L("Starred","עם כוכב") : L("Star","כוכב"));return b
+        }
         switch tableColumn?.identifier.rawValue{case "size":text=bytes(f.allocatedBytes);case "modified":text=DateFormatter.localizedString(from:Date(timeIntervalSince1970:Double(f.identity.modifiedSeconds)),dateStyle:.short,timeStyle:.none);default:text=f.name}
         let v=NSTextField(labelWithString:text);v.lineBreakMode = .byTruncatingMiddle;v.toolTip=f.url.path
         v.font = .systemFont(ofSize:13,weight:tableColumn?.identifier.rawValue == "name" ? .medium : .regular)
@@ -828,6 +842,18 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     /// Home folder shown as ~ so long paths stay readable; the tooltip keeps the full path.
     func displayPath(_ url:URL) -> String { (url.path as NSString).abbreviatingWithTildeInPath }
+    @objc func starClicked(_ sender:NSButton){ guard sender.tag<shown.count else { return };setStar(shown[sender.tag],!starred.contains(shown[sender.tag].id)) }
+    /// S toggles the star on every selected file (all on if any is unstarred).
+    func toggleStar(){
+        guard !busy,!mapMode,!selectedFiles.isEmpty else { return }
+        let files=selectedFiles;let turnOn=files.contains{ !starred.contains($0.id) }
+        for f in files { setStar(f,turnOn,refresh:false) };persistStars();applyFilters()
+    }
+    func setStar(_ f:FileRecord,_ on:Bool,refresh:Bool=true){
+        if on { starred.insert(f.id) } else { starred.remove(f.id) }
+        if refresh { persistStars();applyFilters() }
+    }
+    func persistStars(){ preferences.set(Array(starred).sorted(),forKey:"starredPaths") }
     @objc func selectAllCommand(){
         if let text = window.firstResponder as? NSTextView { text.selectAll(nil) } else { selectAllFiles() }
     }
@@ -914,13 +940,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     @objc func selectExtras(){
         guard !busy,mode.indexOfSelectedItem==1 else{return}
-        let result=ExactDuplicates.selectExtras(exact,visible:Set(shown.map(\.id)));guards=result.keepers
+        // Starred files are never auto-selected as extra copies.
+        let result=ExactDuplicates.selectExtras(exact,visible:Set(shown.map(\.id)).subtracting(starred));guards=result.keepers
         table.selectRowIndexes(IndexSet(shown.indices.filter{result.ids.contains(shown[$0].id)}),byExtendingSelection:false);updateSelection();window.makeFirstResponder(table)
     }
     func makeTrashAlert(_ chosen:[FileRecord])->NSAlert {
         let alert=NSAlert();alert.alertStyle = .warning
         alert.messageText=L("Move selected files to Trash?","להעביר את הבחירה לפח?")
         alert.informativeText="\(chosen.count) " + L("files","קבצים") + " · " + bytes(chosen.reduce(0){$0+$1.allocatedBytes}) + "\n" + L("Undo with ⌘Z.","אפשר לשחזר עם ⌘Z.")
+        let starredCount=chosen.filter{ starred.contains($0.id) }.count
+        if starredCount>0 { alert.alertStyle = .critical;alert.informativeText = "★ \(starredCount) " + L("starred files are included.","קבצים עם כוכב כלולים.") + "\n" + alert.informativeText }
         let list=NSTextView(frame:NSRect(x:0,y:0,width:390,height:min(84,CGFloat(chosen.count)*20+12)))
         list.isEditable=false;list.drawsBackground=false;list.font = .systemFont(ofSize:11);list.string=chosen.map{$0.url.path}.joined(separator:"\n")
         let scroll=NSScrollView(frame:list.frame);scroll.hasVerticalScroller=true;scroll.drawsBackground=false;scroll.documentView=list;alert.accessoryView=scroll
@@ -948,6 +977,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     func finishMove(_ result:MoveResult,nextRow:Int) {
         let moved=Set(result.tickets.map{$0.original.path});files.removeAll{moved.contains($0.id)}
+        if !moved.isDisjoint(with:starred) { starred.subtract(moved);persistStars() }
         exact=[];similar=[];guards=[:];mode.selectItem(at:0);setBusy(false);modeChanged()
         if !shown.isEmpty {let next=min(max(nextRow,0),shown.count-1);table.selectRowIndexes(IndexSet(integer:next),byExtendingSelection:false);table.scrollRowToVisible(next)}
         status.stringValue="\(result.tickets.count) " + L("moved to Trash","הועברו לפח")
@@ -1024,6 +1054,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             mode.selectItem(at:1);modeChanged();selectExtras()
             precondition(selectedFiles.count == 1 && guards.count == 1)
             let extra = selectedFiles[0];precondition(!guards.values.contains(where:{$0.id == extra.id}))
+            setStar(extra,true);selectExtras();precondition(selectedFiles.isEmpty,"A starred extra copy is never auto-selected");setStar(extra,false);selectExtras();precondition(selectedFiles.count == 1)
             mode.selectItem(at:0);modeChanged()
             precondition(selectedFiles.isEmpty && guards.isEmpty,"Changing mode must clear guarded selections")
             mode.selectItem(at:1);modeChanged();selectExtras()
@@ -1062,6 +1093,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             chatFilter.selectItem(at:0);files.removeAll{$0.url == chatFile};try FileManager.default.removeItem(at:temp.appendingPathComponent("Media"));applyFilters();precondition(chatFilter.isHidden)
             table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false)
             precondition(!kindBadge.isHidden && kindBadge.stringValue.contains(Self.kindTitle(.document).uppercased()) && videoHost.isHidden,"Text files show a document badge and no player")
+            // Stars: S toggles, the filter shows or hides starred files, stars persist locally and never auto-select as extras.
+            let starTarget=selectedFiles[0];let sKey=NSEvent.keyEvent(with:.keyDown,location:.zero,modifierFlags:[],timestamp:0,windowNumber:window.windowNumber,context:nil,characters:"s",charactersIgnoringModifiers:"s",isARepeat:false,keyCode:1)!
+            table.keyDown(with:sKey);precondition(starred.contains(starTarget.id) && preferences.stringArray(forKey:"starredPaths") == [starTarget.id],"S stars the selection and persists it")
+            let total=shown.count;starFilter.selectItem(at:1);applyFilters();precondition(shown.map(\.id) == [starTarget.id],"Starred only")
+            starFilter.selectItem(at:2);applyFilters();precondition(shown.count == total-1 && !shown.contains{$0.id == starTarget.id},"Hide starred")
+            starFilter.selectItem(at:0);applyFilters();table.selectRowIndexes(IndexSet(integer:shown.firstIndex{$0.id == starTarget.id}!),byExtendingSelection:false)
+            let starAlert=makeTrashAlert([starTarget]);precondition(starAlert.alertStyle == .critical && starAlert.informativeText.hasPrefix("★ 1"),"Trashing a starred file warns")
+            precondition((tableView(table,viewFor:table.tableColumns[0],row:table.selectedRow) as? NSButton)?.contentTintColor == .systemYellow)
+            table.keyDown(with:sKey);precondition(starred.isEmpty && (preferences.stringArray(forKey:"starredPaths") ?? []).isEmpty,"S again removes the star")
             precondition(selectionLabel.stringValue.hasPrefix(L("Item ","פריט ")+"1"+L(" of ","  מתוך ")+"\(shown.count)"),"Position counter: \(selectionLabel.stringValue)")
             let clip=temp.appendingPathComponent("Synthetic clip.mov");try Self.writeSyntheticVideo(to:clip);files.append(try FileRecord(url:clip));applyFilters()
             table.selectRowIndexes(IndexSet(integer:shown.firstIndex{$0.url.lastPathComponent == "Synthetic clip.mov"}!),byExtendingSelection:false)

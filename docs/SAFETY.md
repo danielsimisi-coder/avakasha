@@ -6,7 +6,7 @@ Keepelix moves selected regular files to the operating system's Trash. It never 
 
 Every move is checked against the original selected root, current canonical path, filesystem device/inode, byte length and nanosecond modification time. Symbolic links and paths redirected through symbolic-link parents are rejected. File size and modification time are rechecked after duplicate hashing. Hard links are excluded as extra copies.
 
-Selecting extra exact duplicates leaves one deterministic original per group. Its presence and identity are checked again before each automatically selected extra is moved. File selection is always reviewable and a confirmation states the file count and combined on-disk size by default. You can disable it with “Do not show again” and restore it from the app menu.
+Starred files are never auto-selected as extra copies, and the confirmation warns when starred files are part of a selection; a star is a local marker in this app, not a lock. Selecting extra exact duplicates leaves one deterministic original per group. Its presence and identity are checked again before each automatically selected extra is moved. File selection is always reviewable and a confirmation states the file count and combined on-disk size by default. You can disable it with “Do not show again” and restore it from the app menu.
 
 ## Undo and Redo
 

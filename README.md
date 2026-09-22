@@ -58,7 +58,7 @@ The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
 |---|---|---|
 | Storage map of any folder or drive, largest folders first | SHA-256 exact-copy groups | Confirmed batch moves to macOS Trash |
 | Space for Quick Look; videos play inline with always-visible controls | Side-by-side duplicate previews | Blocked restores wait for a retry and never overwrite |
-| Type badge (image size, video length), path and "item N of M" for the selection | Loaded location highlighted in the sidebar | Delete does nothing in the map |
+| Star important files (S); show starred only or hide them; stars never auto-select as extras and Trash warns | Type badge (image size, video length), path and "item N of M" for the selection | Loaded location highlighted in the sidebar | Delete does nothing in the map |
 | Command/Shift multi-selection | Select extra copies while keeping one | Undo and redo batches during this session |
 | Filter by name, type and size | Opt-in, local similar-image suggestions | Changed-file and path checks before each move |
 | Stop any scan, map or comparison with the red Stop button or Esc and keep what was found | | |
@@ -83,6 +83,7 @@ The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
 |---|---|
 | `Space` | Play or pause a video; otherwise toggle the preview (open by default) |
 | `Esc` | Stop a running scan, map or comparison and keep partial results |
+| `S` | Star or unstar the selected files (kept by this app only; files are not changed) |
 | `⌘C` | Copy the highlighted file's path (and the file, for pasting into Finder or a chat); right-click the path for the same |
 | `↑` / `↓` | Move through the list |
 | `⌘` + click | Add or remove a file from the selection |

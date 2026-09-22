@@ -2,6 +2,7 @@
 
 ## 0.1.0-beta.8
 
+- Star important files with S or the star column. A filter shows starred files only or hides them. Stars are kept in this app's local preferences by path; files are not modified. Starred files are never auto-selected as extra copies, and the Trash confirmation warns when starred files are included.
 - ⌘C with the list focused, or right-click on the path, copies the highlighted file's path (and the file itself for pasting into Finder or a chat).
 - A chat badge next to the highlighted file names its WhatsApp group or contact (identifier until Chat names is loaded); clicking it filters to that chat.
 
