@@ -3,7 +3,11 @@ import Darwin
 
 /// Session-only undo/redo. Calls must be serialized by the application's work queue.
 public final class TrashHistory {
-    private struct UndoBatch { let root: URL; let tickets: [RestoreTicket]; let keepers: [String: FileRecord] }
+    private struct UndoBatch {
+        let root: URL; let tickets: [RestoreTicket]; let keepers: [String: FileRecord]
+        /// Whole folders moved by this batch. They undo like files but are never redone: redo would have to trust a path, not an identity.
+        var folders: [FolderTicket] = []
+    }
     private struct RedoBatch { let root: URL; let files: [FileRecord]; let keepers: [String: FileRecord] }
     private var undoStack: [UndoBatch] = []
     private var redoStack: [RedoBatch] = []
@@ -19,7 +23,7 @@ public final class TrashHistory {
     public init() {}
     public var canUndo: Bool { !undoStack.isEmpty }
     public var canRedo: Bool { !redoStack.isEmpty }
-    public var blockedCount: Int { blocked.reduce(0) { $0 + $1.tickets.count } }
+    public var blockedCount: Int { blocked.reduce(0) { $0 + $1.tickets.count + $1.folders.count } }
     /// Trash locations of every waiting restore, for Finder recovery after the session.
     public var blockedItems: [RestoreTicket] { blocked.flatMap(\.tickets) }
 
@@ -33,6 +37,17 @@ public final class TrashHistory {
         return result
     }
 
+    /// Moves one whole folder (checked and measured moments before by the caller) and records it for Undo. Not redoable.
+    public func moveFolder(_ folder: URL, root: URL, expected: FolderIdentity, bytes: Int64, backend: TrashBackend = SystemTrash()) -> FolderMoveResult {
+        let result = FolderTrash.move(folder, root: root, expected: expected, backend: backend)
+        if let ticket = result.ticket {
+            undoStack.append(UndoBatch(root: root, tickets: [], keepers: [:], folders: [ticket]))
+            redoStack.removeAll()
+            ticketBytes[ticket.trashed.path] = max(0, bytes); sessionMovedBytes += max(0, bytes)
+        }
+        return result
+    }
+
     /// Adds the allocated bytes of the files behind freshly created tickets; failed files never count.
     private func count(_ tickets: [RestoreTicket], from files: [FileRecord]) {
         let bytes = Dictionary(files.map { ($0.id, $0.allocatedBytes) }, uniquingKeysWith: { first, _ in first })
@@ -40,6 +55,10 @@ public final class TrashHistory {
             guard let size = bytes[ticket.original.path] else { continue }
             ticketBytes[ticket.trashed.path] = size; sessionMovedBytes += size
         }
+    }
+    private func discountFolder(_ ticket: FolderTicket) {
+        guard let size = ticketBytes.removeValue(forKey: ticket.trashed.path) else { return }
+        sessionMovedBytes = max(0, sessionMovedBytes - size)
     }
     /// Subtracts the bytes recorded at move time for every ticket that was actually restored; never below zero.
     private func discount(_ tickets: [RestoreTicket]) {
@@ -58,16 +77,25 @@ public final class TrashHistory {
     public func retryBlocked(backend: TrashBackend = SystemTrash()) -> RestoreResult? {
         guard !blocked.isEmpty else { return nil }
         let waiting = blocked; blocked = []
-        var restored: [URL] = [], pending: [RestoreTicket] = [], failures: [FileFailure] = []
+        var restored: [URL] = [], pending: [RestoreTicket] = [], failures: [FileFailure] = [], pendingFolders: [FolderTicket] = []
         for batch in waiting {
             let result = restore(batch, backend: backend)
-            restored += result.restored; pending += result.pending; failures += result.failures
+            restored += result.restored; pending += result.pending; failures += result.failures; pendingFolders += result.pendingFolders
         }
-        return RestoreResult(restored: restored, pending: pending, failures: failures)
+        return RestoreResult(restored: restored, pending: pending, failures: failures, pendingFolders: pendingFolders)
     }
 
     private func restore(_ batch: UndoBatch, backend: TrashBackend) -> RestoreResult {
         let attempt = TrashService.undo(batch.tickets, root: batch.root, backend: backend)
+        var restoredFolders: [URL] = [], pendingFolders: [FolderTicket] = [], folderFailures: [FileFailure] = []
+        for ticket in batch.folders {
+            var s = stat()
+            let gone = ticket.trashed.withUnsafeFileSystemRepresentation({ lstat($0, &s) }) != 0 && errno == ENOENT
+            if gone { folderFailures.append(FileFailure(url: ticket.original, message: "The folder is no longer in Trash, so it cannot be restored by Keepelix. It may have been restored in Finder or Trash was emptied.")); continue }
+            let outcome = FolderTrash.restore(ticket, root: batch.root, backend: backend)
+            if outcome.restored { restoredFolders.append(ticket.original.standardizedFileURL); discountFolder(ticket) }
+            else { pendingFolders.append(ticket); if let f = outcome.failure { folderFailures.append(f) } }
+        }
         // A ticket whose Trash item is gone (restored in Finder, or Trash emptied) can never succeed; report it once instead of waiting forever.
         var pending: [RestoreTicket] = [], failures: [FileFailure] = []
         for (ticket, failure) in zip(attempt.pending, attempt.failures) {
@@ -76,8 +104,8 @@ public final class TrashHistory {
                 failures.append(FileFailure(url: ticket.original, message: "The item is no longer in Trash, so it cannot be restored by Keepelix. It may have been restored in Finder or Trash was emptied."))
             } else { pending.append(ticket); failures.append(failure) }
         }
-        let result = RestoreResult(restored: attempt.restored, pending: pending, failures: failures)
-        if !result.pending.isEmpty { blocked.append(UndoBatch(root: batch.root, tickets: result.pending, keepers: batch.keepers)) }
+        let result = RestoreResult(restored: attempt.restored + restoredFolders, pending: pending, failures: failures + folderFailures, pendingFolders: pendingFolders)
+        if !result.pending.isEmpty || !pendingFolders.isEmpty { blocked.append(UndoBatch(root: batch.root, tickets: result.pending, keepers: batch.keepers, folders: pendingFolders)) }
         let restored = Set(result.restored.map(\.path))
         discount(batch.tickets.filter { restored.contains($0.original.path) })
         let records = batch.tickets.compactMap { ticket -> FileRecord? in

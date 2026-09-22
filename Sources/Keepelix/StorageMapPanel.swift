@@ -52,6 +52,9 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
     let crumbs = NSPopUpButton()
     let openButton = NSButton()
     let reviewButton = NSButton()
+    /// Hands the map's largest files to file review; enabled whenever a map is loaded.
+    let largestButton = NSButton()
+    var onLargest: (() -> Void)?
     /// Shown when files changed since the map was measured; the numbers on screen are then out of date.
     let rescanButton = NSButton()
     var onRescan: (() -> Void)?
@@ -60,6 +63,8 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
     private let detailSize = NSTextField(labelWithString: "")
     private let detailPath = PathLink()
     private let detailFacts = NSTextField(wrappingLabelWithString: "")
+    /// Up to five of the largest files inside the folder the details describe, as "name · size" lines.
+    private let detailLargest = NSTextField(wrappingLabelWithString: "")
     private let detailNotes = NSTextField(wrappingLabelWithString: "")
     private let caveat = NSTextField(wrappingLabelWithString: L("Sizes are space allocated on disk. Hard links, APFS clones, snapshots and cloud placeholders mean moving files to Trash may free a different amount.", "הגדלים הם המקום שמוקצה בדיסק. קישורים קשיחים, שכפולי APFS, תמונות מצב וקבצי ענן שלא הורדו גורמים לכך שהעברה לפח עשויה לפנות כמות שונה."))
     private(set) var result: StorageMapResult?
@@ -77,6 +82,7 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         crumbs.setAccessibilityLabel(L("Folder path", "נתיב התיקייה"))
         for (button, en, he, symbol, action) in [(openButton, "Open folder", "פתח תיקייה", "arrow.down.right.square", #selector(openSelected)),
                                                   (reviewButton, "Review files here", "סקור קבצים כאן", "list.bullet.rectangle", #selector(reviewSelected)),
+                                                  (largestButton, "Largest files", "הקבצים הגדולים ביותר", "list.number", #selector(largestTapped)),
                                                   (rescanButton, "Rescan", "מדוד מחדש", "arrow.clockwise", #selector(rescanTapped))] {
             button.title = L(en, he); button.target = self; button.action = action; button.bezelStyle = .rounded
             button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil); button.imagePosition = .imageLeading
@@ -84,10 +90,11 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         }
         reviewButton.keyEquivalent = ""; reviewButton.toolTip = L("Show the files of this folder for review. Nothing is moved.", "הצג את קבצי התיקייה לסקירה. שום דבר לא מועבר.")
         openButton.toolTip = L("Return or ⌘↓ opens a folder in the map; ⌘↑ goes up.", "Return או ⌘↓ פותחים תיקייה במפה; ⌘↑ עולה רמה.")
+        largestButton.toolTip = L("Review the largest files found anywhere under the mapped folder. Nothing is moved.", "סקור את הקבצים הגדולים ביותר שנמצאו בכל מקום מתחת לתיקייה הממופה. שום דבר לא מועבר.")
         let spacer = NSView(); spacer.setContentHuggingPriority(.init(1), for: .horizontal)
         rescanButton.isHidden = true; rescanButton.contentTintColor = .systemOrange
         rescanButton.toolTip = L("Files were moved or restored since this map was measured. Measure again to update the numbers.", "קבצים הועברו או שוחזרו מאז שהמפה נמדדה. מדוד מחדש כדי לעדכן את המספרים.")
-        let toolbar = NSStackView(views: [crumbs, spacer, rescanButton, openButton, reviewButton]); toolbar.spacing = 8; toolbar.alignment = .centerY
+        let toolbar = NSStackView(views: [crumbs, spacer, rescanButton, openButton, reviewButton, largestButton]); toolbar.spacing = 8; toolbar.alignment = .centerY
         crumbs.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         table.rowHeight = 30; table.intercellSpacing = NSSize(width: 12, height: 4); table.usesAlternatingRowBackgroundColors = false; table.style = .inset
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle; table.allowsMultipleSelection = false
@@ -112,13 +119,14 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         detailPath.onOpen = { [weak self] in guard let self = self, let node = self.selectedRow?.node ?? self.current else { return }; self.onReveal?(node.url) }
         detailSize.font = .monospacedDigitSystemFont(ofSize: 28, weight: .semibold)
         detailFacts.font = .systemFont(ofSize: 12); detailFacts.textColor = .secondaryLabelColor
+        detailLargest.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular); detailLargest.textColor = .secondaryLabelColor; detailLargest.setAccessibilityLabel(L("Largest files", "הקבצים הגדולים"))
         detailNotes.font = .systemFont(ofSize: 12); detailNotes.textColor = .systemOrange
         caveat.font = .systemFont(ofSize: 11); caveat.textColor = .tertiaryLabelColor
         detail.orientation = .vertical; detail.alignment = .leading; detail.spacing = 10
-        for view in [detailSize, detailTitle, detailPath, detailFacts, detailNotes, caveat] { detail.addArrangedSubview(view) }
+        for view in [detailSize, detailTitle, detailPath, detailFacts, detailLargest, detailNotes, caveat] { detail.addArrangedSubview(view) }
         detail.setCustomSpacing(4, after: detailTitle)
         detail.setCustomSpacing(24, after: detailNotes)
-        for view in [detailTitle, detailPath, detailFacts, detailNotes, caveat] { view.widthAnchor.constraint(equalTo: detail.widthAnchor).isActive = true }
+        for view in [detailTitle, detailPath, detailFacts, detailLargest, detailNotes, caveat] { view.widthAnchor.constraint(equalTo: detail.widthAnchor).isActive = true }
         detail.setAccessibilityLabel(L("Folder details", "פרטי התיקייה"))
         showNothing()
     }
@@ -169,7 +177,7 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
     }
     @objc func openSelected() {
         guard let row = selectedRow else { return }
-        guard let node = row.node, row.isOpenable else { NSSound.beep(); return }
+        guard let node = row.node, row.isOpenable else { if row.isFolder { NSSound.beep() } else { reviewSelected() }; return } // the loose-files row has nothing to open; review it
         show(node); window?.makeFirstResponder(table)
     }
     @objc func goUp() {
@@ -178,6 +186,12 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
     }
     @objc func reviewSelected() { if let url = reviewTarget { onReview?(url) } else { NSSound.beep() } }
     @objc private func rescanTapped() { onRescan?() }
+    @objc private func largestTapped() { if result != nil { onLargest?() } else { NSSound.beep() } }
+    /// The largest mapped files inside `node`; only the files directly inside it for the loose-files row.
+    func largestFiles(in node: StorageNode, directOnly: Bool, limit: Int = 5) -> [LargeFile] {
+        let prefix = node.url.path + "/"
+        return Array((result?.largestFiles ?? []).filter { directOnly ? $0.url.deletingLastPathComponent().path == node.url.path : $0.url.path.hasPrefix(prefix) }.prefix(limit))
+    }
     func setStale(_ stale: Bool) { rescanButton.isHidden = !stale || isEmpty }
     @objc private func jumpToCrumb() {
         guard let current = current else { return }
@@ -226,7 +240,7 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         guard let current = current else {
             detailSize.stringValue = ""; detailTitle.stringValue = L("Where is the space?", "איפה המקום?")
             detailFacts.stringValue = L("Map a folder or drive to see which folders fill it, then review the files inside.", "מפה תיקייה או כונן כדי לראות אילו תיקיות ממלאות אותו, ואז סקור את הקבצים שבפנים.")
-            detailNotes.stringValue = ""; detailNotes.isHidden = true; detailPath.stringValue = ""; detailPath.isHidden = true; return
+            detailNotes.stringValue = ""; detailNotes.isHidden = true; detailPath.stringValue = ""; detailPath.isHidden = true; detailLargest.stringValue = ""; detailLargest.isHidden = true; return
         }
         let row = selectedRow; let node = row?.node ?? current
         let root = result?.root
@@ -241,6 +255,8 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
             facts.append(String(format: L("%.1f%% of ", "%.1f%% מתוך ") + root.name, Double(shown) / Double(root.bytes) * 100))
         }
         detailFacts.stringValue = facts.joined(separator: "\n")
+        let largest = largestFiles(in: node, directOnly: row != nil && row?.node == nil)
+        detailLargest.stringValue = largest.map { $0.url.lastPathComponent + " · " + bytes($0.bytes) }.joined(separator: "\n"); detailLargest.isHidden = largest.isEmpty
         var notes: [String] = []
         if node.isUnreadable { notes.append(L("This folder could not be read. Grant access in System Settings › Privacy & Security, or leave it.", "לא ניתן לקרוא את התיקייה. אפשר לתת גישה ב־System Settings › Privacy & Security או להשאיר אותה.")) }
         if node.isPackage { notes.append(L("A bundle such as an app or a library. Its contents are measured but not reviewed file by file.", "חבילה כמו אפליקציה או ספרייה. התוכן נמדד אך לא נסקר קובץ־קובץ.")) }
@@ -254,6 +270,7 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
     private func updateButtons() {
         openButton.isEnabled = selectedRow?.isOpenable == true
         reviewButton.isEnabled = reviewTarget != nil
+        largestButton.isEnabled = result != nil
     }
-    func setEnabled(_ enabled: Bool) { table.isEnabled = enabled; crumbs.isEnabled = enabled; if enabled { updateButtons() } else { openButton.isEnabled = false; reviewButton.isEnabled = false } }
+    func setEnabled(_ enabled: Bool) { table.isEnabled = enabled; crumbs.isEnabled = enabled; if enabled { updateButtons() } else { openButton.isEnabled = false; reviewButton.isEnabled = false; largestButton.isEnabled = false } }
 }

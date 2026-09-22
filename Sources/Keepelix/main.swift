@@ -16,6 +16,7 @@ final class FileTable: NSTableView {
         if event.keyCode == 51 || event.keyCode == 117 { if !event.isARepeat {owner?.trashSelection()};return }
         if event.keyCode == 49 { if !event.isARepeat { owner?.spacePressed() }; return }
         if event.keyCode == 1 && event.modifierFlags.intersection([.command,.control,.option]).isEmpty { if !event.isARepeat { owner?.toggleStar() }; return } // S
+        if event.keyCode == 40 && event.modifierFlags.intersection([.command,.control,.option,.shift]).isEmpty { if !event.isARepeat { owner?.toggleReviewed() }; return } // K
         if event.modifierFlags.contains(.command) {
             if event.keyCode == 0 { owner?.selectAllFiles(); return }
             if event.keyCode == 6 { if event.modifierFlags.contains(.shift) {owner?.redoTrash()}else{owner?.undoTrash()};return }
@@ -58,12 +59,25 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     let starFilter = NSPopUpButton()
     /// Paths starred by the user. Stored in this app's preferences only; the files themselves are not touched.
     var starred: Set<String> = []
+    /// Files the user looked at and decided to keep; pinned to size and mtime, so a rewritten file shows up again.
+    lazy var reviewed: ReviewedStore = { let p=preferences; return ReviewedStore(load:{ p.dictionary(forKey:"reviewedFiles") as? [String:String] ?? [:] },save:{ p.set($0,forKey:"reviewedFiles") }) }()
+    /// Where the file list came from: a folder scan, or the largest files of the storage map (Refresh re-measures the map).
+    enum ReviewSource { case scan, largestFiles }
+    var reviewSource: ReviewSource = .scan
+    /// True while Refresh re-measures the map for the largest-files view; cleared when the map completes or fails.
+    var pendingLargestReview = false
+    /// The map root the largest-files list was built from; Refresh re-measures this, never whatever was mapped later.
+    var largestRoot: URL?
+    let spaceLabel = NSTextField(labelWithString: "")
     var chatNamesButton: NSButton!
     var autoDownloadButton: NSButton!
     var chatNames: [String: ChatInfo] = [:]
     var chatNamesSource: URL?
     let sortPicker = NSPopUpButton()
-    let ageHint = NSTextField(labelWithString:L("Based on last modification — age alone does not mean a file is unused.","לפי השינוי האחרון — גיל הקובץ לא מעיד בהכרח שלא השתמשת בו."))
+    static let ageHintText = L("Based on last modification — age alone does not mean a file is unused.","לפי השינוי האחרון — גיל הקובץ לא מעיד בהכרח שלא השתמשת בו.")
+    static let installerHintText = L("Installer and archive files not modified in that time. Keep them if the app is not installed yet or the archive was never extracted. You decide.","קבצי התקנה וארכיונים שלא שונו בפרק הזמן הזה. השאר אותם אם האפליקציה עדיין לא מותקנת או שהארכיון לא חולץ. אתה מחליט.")
+    static let reviewTips = L("Space · Play/Pause or Preview     Delete · Trash     ⌘Z · Undo     S · Star   K · Reviewed","רווח · נגן/השהה או תצוגה     Delete · פח     ⌘Z · שחזור     S · כוכב   K · נסקר")
+    let ageHint = NSTextField(labelWithString:AppController.ageHintText)
     let status = NSTextField(labelWithString: "")
     let selectionLabel = NSTextField(labelWithString: "")
     let pathLabel = PathLink()
@@ -108,6 +122,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     var redoButton: NSButton!
     var confirmationMenuItem: NSMenuItem?
     var mapMode = false
+    /// The home screen: disks, this session, where to start. Shown at launch until something is scanned or mapped.
+    var overviewMode = false
+    let overviewPanel = OverviewPanel()
+    var sidebarOverview: NSButton!, sidebarMap: NSButton!, sidebarOlder: NSButton!, sidebarInstallers: NSButton!
+    var previewHostView: NSView!
     let mapPanel = StorageMapPanel()
     var mapRoot: URL?
     var reviewOnlyViews: [NSView] = []
@@ -125,7 +144,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         window = NSWindow(contentRect:NSRect(x:0,y:0,width:1320,height:820),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
-        window.delegate=self; window.title="Keepelix · 0.1.0 beta 8"
+        window.delegate=self; window.title="Keepelix · 0.1.0 beta 9"
         window.minSize=NSSize(width:1120,height:720);window.center();window.titlebarAppearsTransparent=true
         func label(_ text:String,_ size:CGFloat,_ weight:NSFont.Weight = .regular,_ secondary:Bool = false)->NSTextField {
             let v=NSTextField(labelWithString:text);v.font = .systemFont(ofSize:size,weight:weight);v.textColor=secondary ? .secondaryLabelColor : .labelColor;return v
@@ -153,11 +172,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let locationList=column(locationButtons,4)
         let sidebarSpacer=NSView();sidebarSpacer.setContentHuggingPriority(.init(1),for:.vertical)
         let privacy=label(L("Local. Private. Yours.","מקומי. פרטי. שלך."),13,.medium)
-        let olderButton=button("Older files","קבצים ישנים","clock",#selector(showOlderFiles));olderButton.isBordered=false;olderButton.alignment = .left;olderButton.font = .systemFont(ofSize:14,weight:.medium)
+        let overviewEntry=button("Overview","סקירה כללית","house.fill",#selector(showOverview));overviewEntry.isBordered=false;overviewEntry.alignment = .left;overviewEntry.font = .systemFont(ofSize:14,weight:.medium);sidebarOverview=overviewEntry
+        overviewEntry.toolTip=L("Disks, this session and where to start.","כוננים, ההפעלה הזו ומאיפה להתחיל.")
+        let olderButton=button("Older files","קבצים ישנים","clock",#selector(showOlderFiles));olderButton.isBordered=false;olderButton.alignment = .left;olderButton.font = .systemFont(ofSize:14,weight:.medium);sidebarOlder=olderButton
+        let installersButton=button("Installers","קבצי התקנה","shippingbox",#selector(showInstallers));installersButton.isBordered=false;installersButton.alignment = .left;installersButton.font = .systemFont(ofSize:14,weight:.medium);sidebarInstallers=installersButton
+        installersButton.toolTip=L("Disk images, installer packages and archives in this location that have not changed for a while. Nothing is deleted.","תמונות דיסק, חבילות התקנה וארכיונים במיקום הזה שלא השתנו זמן רב. שום דבר לא נמחק.")
         let openBin=button("Trash","פח האשפה","trash",#selector(openTrash));openBin.isBordered=false;openBin.alignment = .left;openBin.font = .systemFont(ofSize:14,weight:.medium)
-        let mapEntry=button("Storage map…","מפת אחסון…","chart.pie.fill",#selector(chooseMapFolder));mapEntry.isBordered=false;mapEntry.alignment = .left;mapEntry.font = .systemFont(ofSize:14,weight:.medium)
+        let mapEntry=button("Storage map…","מפת אחסון…","chart.pie.fill",#selector(chooseMapFolder));mapEntry.isBordered=false;mapEntry.alignment = .left;mapEntry.font = .systemFont(ofSize:14,weight:.medium);sidebarMap=mapEntry
         mapEntry.toolTip=L("See which folders fill a folder or drive. Nothing is deleted.","ראה אילו תיקיות ממלאות תיקייה או כונן. שום דבר לא נמחק.")
-        let sidebarContent=column([brand,label(L("LOCATIONS","מיקומים"),10,.semibold,true),locationList,choose,divider(),mapEntry,olderButton,openBin,sidebarSpacer,privacy],18)
+        let sidebarContent=column([brand,overviewEntry,label(L("LOCATIONS","מיקומים"),10,.semibold,true),locationList,choose,divider(),mapEntry,olderButton,installersButton,openBin,sidebarSpacer,privacy],18)
         let sidebar=NSVisualEffectView();sidebar.material = .sidebar;sidebar.blendingMode = .behindWindow;sidebar.state = .followsWindowActiveState
         sidebar.addSubview(sidebarContent);sidebarContent.translatesAutoresizingMaskIntoConstraints=false
         NSLayoutConstraint.activate([sidebar.widthAnchor.constraint(equalToConstant:216),sidebarContent.leadingAnchor.constraint(equalTo:sidebar.leadingAnchor,constant:20),sidebarContent.trailingAnchor.constraint(equalTo:sidebar.trailingAnchor,constant:-16),sidebarContent.topAnchor.constraint(equalTo:sidebar.topAnchor,constant:24),sidebarContent.bottomAnchor.constraint(equalTo:sidebar.bottomAnchor,constant:-24),locationList.widthAnchor.constraint(equalTo:sidebarContent.widthAnchor)])
@@ -186,14 +209,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         autoDownloadButton=button("Stop auto-download…","עצירת הורדה אוטומטית…","arrow.down.circle.dotted",#selector(openWhatsAppAutoDownload));autoDownloadButton.controlSize = .small;autoDownloadButton.font = .systemFont(ofSize:11);autoDownloadButton.isHidden=true
         autoDownloadButton.toolTip=L("Opens WhatsApp and shows where its media auto-download setting is, so new media stops piling up.","פותח את ווטסאפ ומראה איפה הגדרת ההורדה האוטומטית של מדיה, כדי שמדיה חדשה תפסיק להצטבר.")
         let filters=row([search,sizeFilter,kindFilter,chatFilter,sortPicker]);search.setContentHuggingPriority(.init(1),for:.horizontal)
-        mode.addItems(withTitles:[L("All files","כל הקבצים"),L("Exact duplicates","כפילויות זהות"),L("Similar images","תמונות דומות"),L("Older files","קבצים ישנים")]);mode.target=self;mode.action = #selector(modeChanged)
+        mode.addItems(withTitles:[L("All files","כל הקבצים"),L("Exact duplicates","כפילויות זהות"),L("Similar images","תמונות דומות"),L("Older files","קבצים ישנים"),L("Installers & archives","קבצי התקנה וארכיונים")]);mode.target=self;mode.action = #selector(modeChanged)
         groupPicker.target=self;groupPicker.action = #selector(applyFilters)
         let exactButton=button("Find duplicates","מצא כפילויות","square.on.square",#selector(findExactDuplicates))
         let similarButton=button("Compare images","השווה תמונות","photo.on.rectangle.angled",#selector(findSimilarImages))
         agePicker.addItems(withTitles:[L("Not modified in 6 months","לא שונו בחצי שנה"),L("Not modified in 1 year","לא שונו בשנה"),L("Not modified in 2 years","לא שונו בשנתיים"),L("Not modified in 5 years","לא שונו בחמש שנים")]);agePicker.selectItem(at:1);agePicker.target=self;agePicker.action = #selector(applyFilters)
         ageHint.font = .systemFont(ofSize:11);ageHint.textColor = .secondaryLabelColor
-        starFilter.addItems(withTitles:[L("★ All","★ הכול"),L("Starred only","עם כוכב בלבד"),L("Hide starred","ללא כוכב")]);starFilter.target=self;starFilter.action = #selector(applyFilters);starFilter.font = .systemFont(ofSize:12)
-        starFilter.setAccessibilityLabel(L("Star filter","סינון כוכב"));starFilter.toolTip=L("Star important files with S or the star column. Stars are kept by this app only; files are not changed.","סמן קבצים חשובים ב־S או בעמודת הכוכב. הכוכבים נשמרים באפליקציה בלבד; הקבצים לא משתנים.")
+        starFilter.addItems(withTitles:[L("★ All","★ הכול"),L("Starred only","עם כוכב בלבד"),L("Hide starred","ללא כוכב"),L("Not yet reviewed","טרם נסקרו"),L("Reviewed only","נסקרו בלבד")]);starFilter.target=self;starFilter.action = #selector(applyFilters);starFilter.font = .systemFont(ofSize:12)
+        starFilter.setAccessibilityLabel(L("Star and review filter","סינון כוכב וסקירה"));starFilter.toolTip=L("Star important files with S or the star column. Stars are kept by this app only; files are not changed.","סמן קבצים חשובים ב־S או בעמודת הכוכב. הכוכבים נשמרים באפליקציה בלבד; הקבצים לא משתנים.")
         starred=Set(preferences.stringArray(forKey:"starredPaths") ?? [])
         let analysis=row([mode,groupPicker,agePicker,starFilter,chatNamesButton,autoDownloadButton,spacer(),exactButton,similarButton])
         scroll=NSScrollView();scroll.hasVerticalScroller=true;scroll.hasHorizontalScroller=true;scroll.autohidesScrollers=true
@@ -241,6 +264,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         mapPanel.onReveal={[weak self] url in self?.revealFolder(url)}
         mapPanel.onSelectionChange={[weak self] in self?.refreshEmptyState()}
         mapPanel.onRescan={[weak self] in if let target=self?.mapRoot { self?.startMap(target) }}
+        mapPanel.onLargest={[weak self] in self?.reviewLargestFiles()}
+        overviewPanel.translatesAutoresizingMaskIntoConstraints=false;listHost.addSubview(overviewPanel,positioned:.below,relativeTo:emptyList);overviewPanel.isHidden=true
+        NSLayoutConstraint.activate([overviewPanel.leadingAnchor.constraint(equalTo:listHost.leadingAnchor),overviewPanel.trailingAnchor.constraint(equalTo:listHost.trailingAnchor),overviewPanel.topAnchor.constraint(equalTo:listHost.topAnchor),overviewPanel.bottomAnchor.constraint(equalTo:listHost.bottomAnchor)])
+        overviewPanel.onMapHome={[weak self] in self?.startMap(FileManager.default.homeDirectoryForCurrentUser)}
+        overviewPanel.onMapDrive={[weak self] in self?.chooseMapFolder()}
+        overviewPanel.onOpenTrash={[weak self] in self?.openTrash()}
+        previewHostView=previewHost
         previewHost.addSubview(mapPanel.detail);mapPanel.detail.translatesAutoresizingMaskIntoConstraints=false;mapPanel.detail.isHidden=true
         NSLayoutConstraint.activate([mapPanel.detail.leadingAnchor.constraint(equalTo:previewHost.leadingAnchor,constant:22),mapPanel.detail.trailingAnchor.constraint(equalTo:previewHost.trailingAnchor,constant:-22),mapPanel.detail.topAnchor.constraint(equalTo:previewHost.topAnchor,constant:26)])
         let split=NSSplitView();split.isVertical=true;split.dividerStyle = .thin;split.addArrangedSubview(listHost);split.addArrangedSubview(previewHost)
@@ -263,7 +293,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         chatBadge.toolTip=L("The WhatsApp chat this file belongs to. Click to show only this chat.","השיחה בווטסאפ שהקובץ שייך אליה. לחיצה מציגה רק את השיחה הזו.")
         let selection=row([all,extrasButton,kindBadge,chatBadge,pathLabel,selectionLabel],10)
         let preview=button("Preview","תצוגה מקדימה","eye",#selector(togglePreview));preview.toolTip=L("Space to toggle preview","רווח לפתיחה וסגירה של תצוגה מקדימה")
-        let next=button("Keep & next","השאר והמשך","arrow.right",#selector(nextFile))
+        let next=button("Keep & next","השאר והמשך","arrow.right",#selector(nextFile));next.toolTip=L("Marks the highlighted file as reviewed and kept, then moves to the next one.","מסמן את הקובץ המואר כנסקר ונשמר ועובר לבא.")
         let trash=button("Move to Trash…","העבר לפח…","trash",#selector(trashSelection));trash.contentTintColor = .systemRed
         undoButton=button("Undo","שחזר","arrow.uturn.backward",#selector(undoTrash))
         redoButton=button("Redo","בצע שוב","arrow.uturn.forward",#selector(redoTrash))
@@ -279,8 +309,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         spinner.style = .spinning;spinner.controlSize = .small;spinner.isDisplayedWhenStopped=false
         status.font = .systemFont(ofSize:11);status.textColor = .secondaryLabelColor;status.lineBreakMode = .byTruncatingTail
         let footer=row([spinner,status,spacer(),cancelButton],8)
-        tips=label(L("Space · Play/Pause or Preview     Delete · Trash     ⌘Z · Undo","רווח · נגן/השהה או תצוגה     Delete · פח     ⌘Z · שחזור"),11,.regular,true)
-        let bottom=row([tips,spacer()])
+        tips=label(Self.reviewTips,11,.regular,true)
+        spaceLabel.font = .monospacedDigitSystemFont(ofSize:11,weight:.regular);spaceLabel.textColor = .secondaryLabelColor;spaceLabel.lineBreakMode = .byTruncatingTail;spaceLabel.isHidden=true
+        spaceLabel.toolTip=L("Trash is not free space until you empty it in Finder. APFS clones and snapshots can make the freed amount differ.","הפח אינו מקום פנוי עד שמרוקנים אותו ב־Finder. שכפולי APFS ותמונות מצב עשויים לשנות את הכמות שמתפנה.")
+        spaceLabel.setAccessibilityLabel(L("Session space summary","סיכום מקום בהפעלה זו"))
+        let bottom=row([tips,spacer(),spaceLabel])
         let content=column([header,folderLabel,filters,analysis,ageHint,workspace,selection,divider(),review,footer,bottom],12)
         content.setCustomSpacing(20,after:header);content.setCustomSpacing(16,after:folderLabel)
         reviewOnlyViews=[filters,analysis,ageHint,selection,review]
@@ -288,7 +321,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let rootLayout=row([sidebar,host],0);rootLayout.alignment = .top;rootLayout.distribution = .fill;rootLayout.translatesAutoresizingMaskIntoConstraints=false;window.contentView!.addSubview(rootLayout)
         NSLayoutConstraint.activate([rootLayout.leadingAnchor.constraint(equalTo:window.contentView!.leadingAnchor),rootLayout.trailingAnchor.constraint(equalTo:window.contentView!.trailingAnchor),rootLayout.topAnchor.constraint(equalTo:window.contentView!.topAnchor),rootLayout.bottomAnchor.constraint(equalTo:window.contentView!.bottomAnchor),sidebar.heightAnchor.constraint(equalTo:rootLayout.heightAnchor),host.widthAnchor.constraint(equalTo:rootLayout.widthAnchor,constant:-216),host.heightAnchor.constraint(equalTo:rootLayout.heightAnchor),content.leadingAnchor.constraint(equalTo:host.leadingAnchor,constant:26),content.trailingAnchor.constraint(equalTo:host.trailingAnchor,constant:-26),content.topAnchor.constraint(equalTo:host.topAnchor,constant:24),content.bottomAnchor.constraint(equalTo:host.bottomAnchor,constant:-18),workspace.heightAnchor.constraint(greaterThanOrEqualToConstant:250)])
         for v in [header,folderLabel,filters,analysis,ageHint,workspace,selection,review,footer,bottom] {v.widthAnchor.constraint(equalTo:content.widthAnchor).isActive=true}
-        makeMenus();modeChanged();updateEnabled();updatePreview()
+        makeMenus();modeChanged();updateEnabled();updatePreview();setOverview(true)
         status.stringValue=L("Ready — choose a location to start.","מוכן — בחר מיקום כדי להתחיל.")
         if smokeMode {runSmokeTests();return}
         if ProcessInfo.processInfo.arguments.contains("--launch-check") {print("Packaged launch passed: production preferences and interface initialized; no scan started.");fflush(stdout);exit(0)}
@@ -323,6 +356,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             status.stringValue=L("Read-only demo · generated files only","הדגמה לקריאה בלבד · קבצים מלאכותיים בלבד")
             let featured = ProcessInfo.processInfo.arguments.contains("--demo-video") ? "Harbour clip.mov" : "Coastal morning.png"
             if let row=shown.firstIndex(where:{$0.name == featured}) {table.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false);previewOpen=true;updatePreview()}
+            if ProcessInfo.processInfo.arguments.contains("--demo-overview") { setOverview(true) }
             if ProcessInfo.processInfo.arguments.contains("--demo-map") {
                 mapPanel.load(try StorageMapper.map(root:folder,token:CancellationToken()));mapRoot=folder;setMapMode(true)
                 folderLabel.stringValue=L("Example collection · generated demo files","אוסף לדוגמה · קבצים מלאכותיים")
@@ -422,7 +456,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         }
         return true
     }
-    @objc func aboutApp() { show(L("Keepelix 0.1.0 beta 8", "Keepelix 0.1.0 בטא 8"), "© 2026 Daniel Siman Tov\n" + L("Contact: ","יצירת קשר: ") + "daniel.simisi@gmail.com\n\n" + L("Offline file review. MIT license. Not affiliated with WhatsApp or Meta. Undo is available for this app session; Finder Trash remains available afterward.","סקירת קבצים מקומית. רישיון MIT. ללא שיוך ל־WhatsApp או Meta. שחזור באפליקציה זמין במהלך ההפעלה הנוכחית; הפח של Finder נשאר זמין לאחר מכן.")) }
+    @objc func aboutApp() { show(L("Keepelix 0.1.0 beta 9", "Keepelix 0.1.0 בטא 9"), "© 2026 Daniel Siman Tov\n" + L("Contact: ","יצירת קשר: ") + "daniel.simisi@gmail.com\n\n" + L("Offline file review. MIT license. Not affiliated with WhatsApp or Meta. Undo is available for this app session; Finder Trash remains available afterward.","סקירת קבצים מקומית. רישיון MIT. ללא שיוך ל־WhatsApp או Meta. שחזור באפליקציה זמין במהלך ההפעלה הנוכחית; הפח של Finder נשאר זמין לאחר מכן.")) }
     func show(_ title: String, _ detail: String) {
         if smokeMode { print("Alert suppressed in smoke mode: \(title) — \(detail)"); return }
         let a=NSAlert();a.messageText=title;a.informativeText=detail;a.runModal()
@@ -447,18 +481,47 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         return suggested
     }
     /// A location that is already loaded is shown again instead of scanned again; Refresh rescans explicitly.
+    /// The largest-files list is not a full scan of its root, so choosing that location scans it.
     func isCurrentRoot(_ url:URL) -> Bool {
-        guard let current=root, let resolved=try? FileSafety.root(url) else { return false }
+        guard reviewSource == .scan, let current=root, let resolved=try? FileSafety.root(url) else { return false }
         return resolved.path == current.path
     }
+    /// The sidebar highlights the view you are in: a location while its files are shown, the map, the overview or a review filter.
     func updateLocationHighlight() {
-        let active = (mapMode ? mapRoot : root)?.path
-        for b in locationButtons {
-            let matches = active != nil && locationURL(b.tag).flatMap{ try? FileSafety.root($0) }?.path == active
+        let active = (!mapMode && !overviewMode) ? root?.path : nil
+        func highlight(_ b: NSButton?, _ on: Bool, _ value: String) {
+            guard let b=b else { return }
             b.wantsLayer=true;b.layer?.cornerRadius=7
-            b.layer?.backgroundColor = matches ? NSColor.controlAccentColor.withAlphaComponent(0.22).cgColor : nil
-            b.contentTintColor = matches ? .controlAccentColor : .labelColor
-            b.setAccessibilityValue(matches ? L("Current location","המיקום הנוכחי") : "")
+            b.layer?.backgroundColor = on ? NSColor.controlAccentColor.withAlphaComponent(0.22).cgColor : nil
+            b.contentTintColor = on ? .controlAccentColor : .labelColor
+            b.setAccessibilityValue(on ? value : "")
+        }
+        for b in locationButtons {
+            let matches = active != nil && reviewSource == .scan && locationURL(b.tag).flatMap{ try? FileSafety.root($0) }?.path == active
+            highlight(b, matches, L("Current location","המיקום הנוכחי"))
+        }
+        let reviewing = !mapMode && !overviewMode && root != nil
+        highlight(sidebarOverview, overviewMode, L("Current view","התצוגה הנוכחית"))
+        highlight(sidebarMap, mapMode, L("Current view","התצוגה הנוכחית"))
+        highlight(sidebarOlder, reviewing && mode.indexOfSelectedItem == 3, L("Current view","התצוגה הנוכחית"))
+        highlight(sidebarInstallers, reviewing && mode.indexOfSelectedItem == 4, L("Current view","התצוגה הנוכחית"))
+    }
+    @objc func showOverview() { guard !busy else { return };setOverview(true) }
+    func setOverview(_ on:Bool) {
+        guard on != overviewMode || on else { return }
+        overviewMode=on
+        if on {
+            if mapMode { mapMode=false }
+            reviewOnlyViews.forEach{$0.isHidden=true};scroll.isHidden=true;mapPanel.isHidden=true;mapPanel.detail.isHidden=true
+            overviewPanel.isHidden=false;previewHostView.isHidden=true;emptyList.isHidden=true
+            headingLabel.stringValue=L("Overview","סקירה כללית");folderLabel.stringValue=L("Disks, this session and where to start","כוננים, ההפעלה הזו ומאיפה להתחיל")
+            tips.stringValue=L("Choose a location to review its files, or map a folder or drive to see what fills it.","בחר מיקום כדי לסקור את הקבצים שלו, או מפה תיקייה או כונן כדי לראות מה ממלא אותו.")
+            mapButton.title=L("Storage map","מפת אחסון");mapButton.image=NSImage(systemSymbolName:"chart.pie",accessibilityDescription:nil)
+            primary.previewItem=nil;comparison.previewItem=nil;stopVideo()
+            overviewPanel.update(sessionMoved:totalMovedBytes)
+            updateEnabled();updateLocationHighlight();window.makeFirstResponder(overviewPanel.mapHomeButton)
+        } else {
+            overviewPanel.isHidden=true;previewHostView.isHidden=false
         }
     }
     @objc func chooseLocation(_ sender:NSButton) {
@@ -482,7 +545,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     @objc func rescanFolder() {
         guard !busy else { return }
-        if mapMode { if let target=mapRoot { startMap(target) } } else if let root=root { startScan(root) }
+        if mapMode { if let target=mapRoot { startMap(target) } }
+        else if reviewSource == .largestFiles, let target=largestRoot { pendingLargestReview=true;startMap(target) }
+        else if let root=root { startScan(root) }
     }
     @objc func cancelWork() { guard busy, cancellable else { return };token.cancel();status.stringValue=L("Stopping… keeping what was found","עוצר… שומר את מה שנמצא");cancelButton.isEnabled=false;rescanButton.isEnabled=false }
     func setBusy(_ value: Bool, cancellable: Bool = true) {
@@ -503,10 +568,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             b.isEnabled = !busy
             if let action=b.action, requiresSelection.contains(action) { b.isEnabled = !busy && !selectedFiles.isEmpty }
             if let action=b.action, requiresFiles.contains(action) { b.isEnabled = !busy && !files.isEmpty }
-            if b.action == #selector(showOlderFiles) { b.isEnabled = !busy && root != nil }
-            if b.action == #selector(rescanFolder) { b.isEnabled = !busy && (mapMode ? mapRoot != nil : root != nil) }
+            if b.action == #selector(showOlderFiles) || b.action == #selector(showInstallers) { b.isEnabled = !busy && root != nil }
+            if b.action == #selector(rescanFolder) { b.isEnabled = !busy && !overviewMode && (mapMode ? mapRoot != nil : root != nil);b.isHidden = overviewMode }
             if b.action == #selector(cancelWork) && b !== cancelButton { b.isEnabled = busy && cancellable && !token.isCancelled }
-            if b.action == #selector(showStorageMap) { b.isEnabled = !busy && (mapMode ? root != nil : (root != nil || mapPanel.result != nil)) }
+            if b.action == #selector(showStorageMap) { b.isEnabled = !busy && (overviewMode ? true : (mapMode ? root != nil : (root != nil || mapPanel.result != nil)));b.isHidden = overviewMode && mapPanel.result == nil }
+            if b.action == #selector(showOverview) { b.isEnabled = !busy }
             if b.action == #selector(retryRestore) { b.isEnabled = !busy && !demoMode && !mapMode && history.blockedCount > 0 }
             if demoMode && (b.action == #selector(trashSelection) || b.action == #selector(undoTrash) || b.action == #selector(redoTrash)) { b.isEnabled=false }
             if b.action == #selector(resumeFolder) { b.isEnabled = !busy && preferences.string(forKey:"lastFolder") != nil }
@@ -522,12 +588,26 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     func activateRoot(_ selectedRoot: URL) {
         if let root=root {folderHistories[root.path]=history}
         history=folderHistories[selectedRoot.path] ?? TrashHistory()
-        root=selectedRoot
+        root=selectedRoot;updateSpaceLabel()
+    }
+    /// Bytes this session moved to Trash across every folder history, each history counted once.
+    var totalMovedBytes:Int64 {
+        var seen=Set<ObjectIdentifier>();var total:Int64=0
+        for h in [history]+Array(folderHistories.values) where seen.insert(ObjectIdentifier(h)).inserted {total+=h.sessionMovedBytes}
+        return total
+    }
+    /// Two honest numbers side by side: what was moved (still in Trash) and what the volume reports free. Never a prediction.
+    func updateSpaceLabel() {
+        guard let anchor=root ?? mapRoot else { spaceLabel.isHidden=true;return }
+        var text = totalMovedBytes > 0 ? L("Moved to Trash this session: ","הועבר לפח בהפעלה זו: ")+bytes(totalMovedBytes) : L("Nothing moved to Trash yet","עדיין לא הועבר דבר לפח")
+        if let free=DiskSpace.available(at:anchor) { text += " · "+L("Free on this volume: ","פנוי בכונן הזה: ")+bytes(free) }
+        spaceLabel.stringValue=text;spaceLabel.isHidden=false
+        if overviewMode { overviewPanel.update(sessionMoved:totalMovedBytes) }
     }
     func startScan(_ url: URL) {
         guard !busy else{return}
         do { activateRoot(try FileSafety.root(url)) } catch { show(L("Cannot scan this folder","לא ניתן לסרוק את התיקייה"),error.localizedDescription);return }
-        if mapMode { setMapMode(false) }
+        reviewSource = .scan;if overviewMode { setOverview(false) };if mapMode { setMapMode(false) }
         let selectedRoot=root!;preferences.set(selectedRoot.path,forKey:"lastFolder");folderLabel.stringValue=selectedRoot.path;updateLocationHighlight()
         if chatNamesSource != ChatDirectory.databaseURL(near:selectedRoot) { chatNames=[:];chatNamesSource=nil }
         chatFilter.removeAllItems()
@@ -537,7 +617,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             do {
                 let result=try Scanner.scan(root:selectedRoot,token:jobToken){count in DispatchQueue.main.async{self.status.stringValue=L("Scanning: ","נסרקו: ")+String(count)}}
                 DispatchQueue.main.async {
-                    self.files=result.files;self.setBusy(false);self.applyFilters()
+                    self.files=result.files;self.setBusy(false);self.applyFilters();self.updateSpaceLabel()
                     self.status.stringValue="\(result.files.count) "+L("files","קבצים")+" · \(result.skipped) "+L("skipped","דולגו") + (result.cancelled ? " · "+L("Stopped · partial results","נעצר · תוצאות חלקיות") : "")
                     if let last=self.preferences.string(forKey:"lastFile"),let i=self.shown.firstIndex(where:{$0.id==last}) {self.table.selectRowIndexes(IndexSet(integer:i),byExtendingSelection:false);self.table.scrollRowToVisible(i)}
                 }
@@ -546,11 +626,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     // MARK: Storage map
     func setMapMode(_ on:Bool) {
+        if overviewMode { setOverview(false) }
         mapMode=on
         reviewOnlyViews.forEach{$0.isHidden=on}
         scroll.isHidden=on;mapPanel.isHidden = !on;mapPanel.detail.isHidden = !on
         headingLabel.stringValue = on ? L("Where is the space?","איפה המקום?") : L("Your files","הקבצים שלך")
-        tips.stringValue = on ? L("Return · Open folder     ⌘↑ · Up     Review files here · Switch to file review","Return · פתיחת תיקייה     ⌘↑ · למעלה     סקור קבצים כאן · מעבר לסקירת קבצים") : L("Space · Play/Pause or Preview     Delete · Trash     ⌘Z · Undo","רווח · נגן/השהה או תצוגה     Delete · פח     ⌘Z · שחזור")
+        tips.stringValue = on ? L("Return · Open folder     ⌘↑ · Up     Review files here · Switch to file review","Return · פתיחת תיקייה     ⌘↑ · למעלה     סקור קבצים כאן · מעבר לסקירת קבצים") : Self.reviewTips
         mapButton.title = on ? L("Back to files","חזרה לקבצים") : L("Storage map","מפת אחסון")
         mapButton.image = NSImage(systemSymbolName: on ? "list.bullet" : "chart.pie",accessibilityDescription:nil);mapButton.setAccessibilityLabel(mapButton.title)
         if on {
@@ -559,8 +640,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             if mapStale, let result=mapPanel.result { status.stringValue=mapSummary(result)+" · "+L("changed since measured · Rescan","השתנה מאז המדידה · מדוד מחדש") }
             primary.previewItem=nil;comparison.previewItem=nil;stopVideo();previewPlaceholder.isHidden=true;primary.isHidden=true;comparison.isHidden=true
         } else {
-            if !demoMode { folderLabel.stringValue = root?.path ?? L("Choose a location from the sidebar to begin","בחר מיקום מהסרגל הצדדי כדי להתחיל") }
-            ageHint.isHidden = mode.indexOfSelectedItem != 3;comparison.isHidden = !(mode.indexOfSelectedItem == 1 || mode.indexOfSelectedItem == 2);updateSelection()
+            if !demoMode { folderLabel.stringValue = root.map{ $0.path + (reviewSource == .largestFiles ? " · "+L("largest files","הקבצים הגדולים") : "") } ?? L("Choose a location from the sidebar to begin","בחר מיקום מהסרגל הצדדי כדי להתחיל") }
+            ageHint.isHidden = !usesAge;comparison.isHidden = !(mode.indexOfSelectedItem == 1 || mode.indexOfSelectedItem == 2);updateSelection()
         }
         refreshEmptyState();updateEnabled();updateLocationHighlight()
     }
@@ -571,8 +652,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             emptyListDetail?.stringValue = busy ? L("A large drive can take a while. Cancel keeps partial results.","כונן גדול עשוי לקחת זמן. ביטול שומר תוצאות חלקיות.") : L("Choose Storage map in the sidebar, then a folder or drive","בחר מפת אחסון בסרגל הצדדי, ואז תיקייה או כונן")
         } else {
             emptyList?.isHidden = !shown.isEmpty
-            emptyListTitle?.stringValue = busy ? L("Scanning…","סורק…") : (root == nil ? L("Start somewhere simple","מתחילים בתיקייה אחת") : L("No matching files","אין קבצים מתאימים"))
-            emptyListDetail?.stringValue = busy ? L("Reading names and sizes only. Cancel keeps what was found.","קורא רק שמות וגדלים. ביטול שומר את מה שנמצא.") : (root == nil ? L("Choose a location from the sidebar","בחר מיקום מהסרגל הצדדי") : L("Try another filter or location","נסה מסנן אחר או מיקום אחר"))
+            emptyListTitle?.stringValue = busy ? L("Scanning…","סורק…") : (root == nil ? L("Start somewhere simple","מתחילים בתיקייה אחת") : (reviewSource == .largestFiles && files.isEmpty ? L("No reviewable large files here","אין כאן קבצים גדולים לסקירה") : L("No matching files","אין קבצים מתאימים")))
+            emptyListDetail?.stringValue = busy ? L("Reading names and sizes only. Cancel keeps what was found.","קורא רק שמות וגדלים. ביטול שומר את מה שנמצא.") : (root == nil ? L("Choose a location from the sidebar","בחר מיקום מהסרגל הצדדי") : (reviewSource == .largestFiles && files.isEmpty ? L("The map found nothing here that file review can show","המפה לא מצאה כאן דבר שסקירת הקבצים יכולה להציג") : L("Try another filter or location","נסה מסנן אחר או מיקום אחר")))
             let last=preferences.string(forKey:"lastFolder")
             continueLink.isHidden = busy || root != nil || last == nil || demoMode
             continueLink.stringValue = last.map{ L("Continue: ","המשך: ")+displayPath(URL(fileURLWithPath:$0)) } ?? "";continueLink.toolTip=last
@@ -587,6 +668,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     @objc func showStorageMap() {
         guard !busy else { return }
+        if overviewMode { if mapPanel.result != nil, let target=mapRoot { setOverview(false);mapRoot=target;setMapMode(true);window.makeFirstResponder(mapPanel.table) } else { chooseMapFolder() };return }
         if mapMode { if root != nil { setMapMode(false);window.makeFirstResponder(table) };return }
         guard let current=root else { chooseMapFolder();return }
         if mapPanel.result != nil, mapPanel.reveal(folder:current) { mapRoot=mapPanel.result?.root.url;setMapMode(true);window.makeFirstResponder(mapPanel.table);return }
@@ -599,7 +681,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             let detail = url.standardizedFileURL.path == "/" ? L("The whole startup disk cannot be mapped. Choose your home folder, a folder inside it, or an external drive.","אי אפשר למפות את כל דיסק ההפעלה. בחר את תיקיית הבית, תיקייה בתוכה או כונן חיצוני.") : error.localizedDescription
             show(L("Cannot map this folder","לא ניתן למפות את התיקייה"),detail);return
         }
-        mapRoot=target;mapPanel.load(nil);setMapMode(true);folderLabel.stringValue=target.path;updateLocationHighlight()
+        mapRoot=target;mapPanel.load(nil);if overviewMode { setOverview(false) };setMapMode(true);folderLabel.stringValue=target.path;updateLocationHighlight()
         token=CancellationToken();let jobToken=token;setBusy(true);refreshEmptyState()
         status.stringValue=L("Measuring folders…","מודד תיקיות…")
         work.async {
@@ -610,10 +692,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
                     DispatchQueue.main.async{self.status.stringValue=L("Measuring: ","מודד: ")+"\(entries) "+L("items","פריטים")+" · "+bytes(total)}
                 }
                 DispatchQueue.main.async {
-                    self.setBusy(false);self.mapStale=false;self.mapPanel.load(result);self.mapPanel.setStale(false);self.refreshEmptyState()
+                    self.setBusy(false);self.mapStale=false;self.mapPanel.load(result);self.mapPanel.setStale(false);self.refreshEmptyState();self.updateSpaceLabel()
                     self.status.stringValue=self.mapSummary(result);self.window.makeFirstResponder(self.mapPanel.table)
+                    if self.pendingLargestReview { self.pendingLargestReview=false;self.reviewLargestFiles() }
                 }
-            } catch {DispatchQueue.main.async{self.setBusy(false);self.refreshEmptyState();self.show(L("Cannot map this folder","לא ניתן למפות את התיקייה"),error.localizedDescription)}}
+            } catch {DispatchQueue.main.async{self.pendingLargestReview=false;self.setBusy(false);self.refreshEmptyState();self.show(L("Cannot map this folder","לא ניתן למפות את התיקייה"),error.localizedDescription)}}
         }
     }
     func mapSummary(_ result:StorageMapResult)->String {
@@ -627,25 +710,45 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         return parts.joined(separator:" · ")
     }
     func reviewFromMap(_ url:URL) { guard !busy else{return};startScan(url) }
+    /// The map's largest files as a review list. Every file is re-validated against the map root, so the list can
+    /// never hold a file outside it or one that changed since the map was measured.
+    @objc func reviewLargestFiles() {
+        guard !busy, let result=mapPanel.result, let mapRoot=mapRoot else { return }
+        activateRoot(mapRoot);reviewSource = .largestFiles;largestRoot=mapRoot
+        files=result.largestFiles.compactMap{ f in guard let record=try? FileRecord(url:f.url), (try? FileSafety.validate(record,root:mapRoot)) != nil else { return nil };return record }
+        if chatNamesSource != ChatDirectory.databaseURL(near:mapRoot) { chatNames=[:];chatNamesSource=nil }
+        chatFilter.removeAllItems();primary.previewItem=nil;comparison.previewItem=nil;stopVideo();exact=[];similar=[];guards=[:]
+        mode.selectItem(at:0);sortPicker.selectItem(at:ReviewSort.largest.rawValue);setMapMode(false);changeSort();modeChanged()
+        folderLabel.stringValue=mapRoot.path+" · "+L("largest files","הקבצים הגדולים");updateLocationHighlight()
+        if files.isEmpty { status.stringValue=L("No reviewable large files here","אין כאן קבצים גדולים לסקירה") }
+        else { status.stringValue="\(files.count) "+L("largest files under ","הקבצים הגדולים ביותר תחת ")+mapRoot.lastPathComponent+" · "+L("sizes are space on disk","הגדלים הם מקום בדיסק") }
+        // The map's own caveats travel with the list: a stopped or stale measurement is not a complete top list.
+        if result.cancelled { status.stringValue += " · "+L("Stopped · partial results","נעצר · תוצאות חלקיות") }
+        if mapStale { status.stringValue += " · "+L("changed since measured · Refresh","השתנה מאז המדידה · רענן") }
+        if !shown.isEmpty { table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false);table.scrollRowToVisible(0) }
+        window.makeFirstResponder(table)
+    }
     func revealFolder(_ url:URL) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
     var currentGroups: [DuplicateGroup] {mode.indexOfSelectedItem == 1 ? exact : (mode.indexOfSelectedItem == 2 ? similar : [])}
+    /// Older files and Installers & archives both take their cutoff from the age popup.
+    var usesAge: Bool { mode.indexOfSelectedItem == 3 || mode.indexOfSelectedItem == 4 }
     @objc func modeChanged() {
         groupPicker.removeAllItems();groupPicker.addItem(withTitle:L("All groups","כל הקבוצות"))
         for (i,g) in currentGroups.enumerated(){groupPicker.addItem(withTitle:"\(i+1) · \(g.members.count) files")}
         let duplicates = mode.indexOfSelectedItem == 1 || mode.indexOfSelectedItem == 2
         groupPicker.isHidden = !duplicates;comparison.isHidden = !duplicates
-        agePicker.isHidden = mode.indexOfSelectedItem != 3;ageHint.isHidden = mode.indexOfSelectedItem != 3
-        table.deselectAll(nil);guards=[:];applyFilters();updateEnabled()
+        agePicker.isHidden = !usesAge;ageHint.isHidden = !usesAge;ageHint.stringValue = mode.indexOfSelectedItem == 4 ? Self.installerHintText : Self.ageHintText
+        table.deselectAll(nil);guards=[:];applyFilters();updateEnabled();updateLocationHighlight()
     }
     @objc func applyFilters() {
         let old=Set(selectedFiles.map(\.id));let threshold:[Int64]=[0,10_000_000,100_000_000,1_000_000_000]
         let groupIndex=groupPicker.indexOfSelectedItem-1
         let groups=currentGroups
-        let members:Set<String>? = (mode.indexOfSelectedItem==0 || mode.indexOfSelectedItem==3) ? nil : Set((groupIndex>=0 && groupIndex<groups.count ? groups[groupIndex].members : groups.flatMap(\.members)).map(\.id))
+        let members:Set<String>? = (mode.indexOfSelectedItem==0 || usesAge) ? nil : Set((groupIndex>=0 && groupIndex<groups.count ? groups[groupIndex].members : groups.flatMap(\.members)).map(\.id))
         let query=search.stringValue.lowercased()
         let months=[6,12,24,60][max(0,agePicker.indexOfSelectedItem)]
         let cutoff=Calendar.current.date(byAdding:.month,value:-months,to:Date()) ?? .distantPast
-        var candidates=mode.indexOfSelectedItem == 3 ? ReviewQuery.older(files,than:cutoff) : files
+        var candidates=mode.indexOfSelectedItem == 3 ? ReviewQuery.older(files,than:cutoff) : (mode.indexOfSelectedItem == 4 ? ReviewQuery.installers(files,olderThan:cutoff) : files)
         chatFilter.isHidden = !files.contains{ ChatFolders.kind(of:$0.url) != nil }
         chatNamesButton?.isHidden = chatFilter.isHidden || !chatNames.isEmpty
         autoDownloadButton?.isHidden = chatFilter.isHidden
@@ -655,8 +758,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             else if chatFilter.indexOfSelectedItem > 0 && chatFilter.indexOfSelectedItem <= ChatKind.allCases.count { candidates=ChatFolders.filter(candidates,kind:ChatKind.allCases[chatFilter.indexOfSelectedItem-1]) }
         }
         let starMode=starFilter.indexOfSelectedItem
+        func passesStar(_ f:FileRecord)->Bool { switch starMode {case 1:return starred.contains(f.id);case 2:return !starred.contains(f.id);case 3:return !reviewed.isReviewed(f);case 4:return reviewed.isReviewed(f);default:return true} }
         shown=candidates.filter { f in
-            (starMode == 0 || (starMode == 1) == starred.contains(f.id)) &&
+            passesStar(f) &&
             f.allocatedBytes>=threshold[max(0,sizeFilter.indexOfSelectedItem)] && (query.isEmpty || f.url.path.lowercased().contains(query)) &&
             (kindFilter.indexOfSelectedItem==0 || f.kind == FileKind.allCases[kindFilter.indexOfSelectedItem-1]) && (members==nil || members!.contains(f.id))
         }
@@ -727,7 +831,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             }
         }
     }
-    @objc func showOlderFiles() { guard !busy,root != nil else{return};if mapMode {setMapMode(false)};mode.selectItem(at:3);modeChanged();window.makeFirstResponder(table) }
+    @objc func showOlderFiles() { guard !busy,root != nil else{return};if overviewMode {setOverview(false)};setMapMode(false);mode.selectItem(at:3);modeChanged();updateLocationHighlight();window.makeFirstResponder(table) }
+    @objc func showInstallers() { guard !busy,root != nil else{return};if overviewMode {setOverview(false)};setMapMode(false);mode.selectItem(at:4);modeChanged();updateLocationHighlight();window.makeFirstResponder(table) }
     @objc func changeSort() {
         guard !busy else{return}
         let order=ReviewSort(rawValue:sortPicker.indexOfSelectedItem) ?? .largest
@@ -762,8 +867,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     func tableView(_ tableView:NSTableView,viewFor tableColumn:NSTableColumn?,row:Int)->NSView?{
         let f=shown[row];let text:String
         if tableColumn?.identifier.rawValue == "star" {
-            let on=starred.contains(f.id);let b=NSButton(image:NSImage(systemSymbolName:on ? "star.fill" : "star",accessibilityDescription:on ? L("Starred","עם כוכב") : L("Not starred","ללא כוכב"))!,target:self,action:#selector(starClicked(_:)))
-            b.isBordered=false;b.contentTintColor = on ? .systemYellow : .tertiaryLabelColor;b.tag=row;b.toolTip=L("Star this file (S)","סמן בכוכב (S)");b.setAccessibilityLabel(on ? L("Starred","עם כוכב") : L("Star","כוכב"));return b
+            let on=starred.contains(f.id);let kept = !on && reviewed.isReviewed(f) // a star always wins over the reviewed mark
+            let label = on ? L("Starred","עם כוכב") : (kept ? L("Reviewed and kept","נסקר ונשמר") : L("Star","כוכב"))
+            let b=NSButton(image:NSImage(systemSymbolName:on ? "star.fill" : (kept ? "checkmark.circle.fill" : "star"),accessibilityDescription:on ? L("Starred","עם כוכב") : (kept ? label : L("Not starred","ללא כוכב")))!,target:self,action:kept ? #selector(reviewedClicked(_:)) : #selector(starClicked(_:)))
+            b.isBordered=false;b.contentTintColor = on ? .systemYellow : (kept ? .systemGreen : .tertiaryLabelColor);b.tag=row
+            b.toolTip = kept ? L("Reviewed and kept · click or K to review again","נסקר ונשמר · לחיצה או K לסקירה מחדש") : L("Star this file (S)","סמן בכוכב (S)");b.setAccessibilityLabel(label);return b
         }
         switch tableColumn?.identifier.rawValue{case "size":text=bytes(f.allocatedBytes);case "modified":text=DateFormatter.localizedString(from:Date(timeIntervalSince1970:Double(f.identity.modifiedSeconds)),dateStyle:.short,timeStyle:.none);default:text=f.name}
         let v=NSTextField(labelWithString:text);v.lineBreakMode = .byTruncatingMiddle;v.toolTip=f.url.path
@@ -788,6 +896,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         if chosen.isEmpty { selectionLabel.stringValue="\(shown.count) " + L("items","פריטים") }
         else { selectionLabel.stringValue=L("Item ","פריט ")+"\((table.selectedRowIndexes.contains(focusRow) ? focusRow : table.selectedRowIndexes.first!)+1)"+L(" of ","  מתוך ")+"\(shown.count) · \(chosen.count) "+L("selected","נבחרו")+" · "+bytes(chosen.reduce(0){$0+$1.allocatedBytes}) }
         let focused=focusedFile
+        if let f=focused, reviewed.isReviewed(f) { selectionLabel.stringValue += " · "+L("reviewed","נסקר") }
         pathLabel.stringValue = focused.map{ displayPath($0.url) } ?? "";pathLabel.toolTip = focused?.url.path
         updateKindBadge(focused);updateChatBadge(focused)
         refreshEmptyState()
@@ -796,6 +905,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     static func kindTitle(_ kind:FileKind) -> String {
         switch kind {case .image:return L("Image","תמונה");case .video:return L("Video","וידאו");case .audio:return L("Audio","שמע");case .document:return L("Document","מסמך");case .archive:return L("Archive","ארכיון");case .other:return L("File","קובץ")}
     }
+    static func installerTitle(_ kind:InstallerKind) -> String {
+        switch kind {case .diskImage:return L("Disk image","דמות דיסק");case .package:return L("Package","חבילת התקנה");case .archive:return L("Archive","ארכיון")}
+    }
     static func kindColor(_ kind:FileKind) -> NSColor {
         switch kind {case .video:return .systemPurple;case .image:return .systemTeal;case .audio:return .systemOrange;default:return .secondaryLabelColor}
     }
@@ -803,8 +915,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     func updateKindBadge(_ file:FileRecord?) {
         mediaInfoGeneration += 1;let generation=mediaInfoGeneration
         guard let f=file else { kindBadge.isHidden=true;return }
-        func show(_ text:String) { kindBadge.stringValue="  "+text+"  ";kindBadge.textColor=Self.kindColor(f.kind);kindBadge.layer?.backgroundColor=Self.kindColor(f.kind).withAlphaComponent(0.16).cgColor;kindBadge.isHidden=false }
-        show(Self.kindTitle(f.kind).uppercased())
+        let installer=ReviewQuery.installerKind(f.url);let color:NSColor = installer == nil ? Self.kindColor(f.kind) : .systemIndigo
+        func show(_ text:String) { kindBadge.stringValue="  "+text+"  ";kindBadge.textColor=color;kindBadge.layer?.backgroundColor=color.withAlphaComponent(0.16).cgColor;kindBadge.isHidden=false }
+        show((installer.map(Self.installerTitle) ?? Self.kindTitle(f.kind)).uppercased())
         if f.kind == .image, let source=CGImageSourceCreateWithURL(f.url as CFURL,[kCGImageSourceShouldCache:false] as CFDictionary),
            let properties=CGImageSourceCopyPropertiesAtIndex(source,0,nil) as? [CFString:Any],
            let w=properties[kCGImagePropertyPixelWidth] as? NSNumber,let h=properties[kCGImagePropertyPixelHeight] as? NSNumber {
@@ -853,6 +966,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     /// Home folder shown as ~ so long paths stay readable; the tooltip keeps the full path.
     func displayPath(_ url:URL) -> String { (url.path as NSString).abbreviatingWithTildeInPath }
     @objc func starClicked(_ sender:NSButton){ guard sender.tag<shown.count else { return };setStar(shown[sender.tag],!starred.contains(shown[sender.tag].id)) }
+    @objc func reviewedClicked(_ sender:NSButton){ guard !busy,sender.tag<shown.count else { return };reviewed.toggle([shown[sender.tag]]);applyFilters() }
+    /// K marks every selected file as reviewed and kept (all off again if every one already is). Files are never touched.
+    func toggleReviewed(){ guard !busy,!mapMode,!selectedFiles.isEmpty else { return };reviewed.toggle(selectedFiles);applyFilters() }
     /// S toggles the star on every selected file (all on if any is unstarred).
     func toggleStar(){
         guard !busy,!mapMode,!selectedFiles.isEmpty else { return }
@@ -871,7 +987,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         guard !busy,!mapMode else{return};guards=[:];table.selectAll(nil);updateSelection()
     }
     @objc func deselect(){guard !busy,!mapMode else{return};guards=[:];table.deselectAll(nil);updateSelection()}
-    @objc func nextFile(){guard !busy,!shown.isEmpty else{return};let i=min(max(table.selectedRow+1,0),shown.count-1);table.selectRowIndexes(IndexSet(integer:i),byExtendingSelection:false);table.scrollRowToVisible(i);window.makeFirstResponder(table)}
+    /// Keep & next remembers the focused file as reviewed, then steps on; under "Not yet reviewed" the kept file leaves the list and the next one takes its row.
+    @objc func nextFile(){
+        guard !busy,!mapMode,!overviewMode,!shown.isEmpty else{return};let current=max(table.selectedRow,0)
+        if let f=focusedFile { reviewed.mark([f]) };applyFilters()
+        guard !shown.isEmpty else { return };let i=min(table.selectedRow < 0 ? current : current+1,shown.count-1)
+        table.selectRowIndexes(IndexSet(integer:i),byExtendingSelection:false);table.scrollRowToVisible(i);window.makeFirstResponder(table)
+    }
     @objc func togglePreview(){guard !busy else{return};previewOpen.toggle();updatePreview();window.makeFirstResponder(table)}
     func spacePressed(){ guard !busy else{return}; if !mapMode, !videoHost.isHidden, videoPlayer.player != nil { togglePlayback() } else { togglePreview() } }
     func stopVideo(){
@@ -991,7 +1113,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         if !result.tickets.isEmpty { markMapStale() }
         let moved=Set(result.tickets.map{$0.original.path});files.removeAll{moved.contains($0.id)}
         if !moved.isDisjoint(with:starred) { starred.subtract(moved);persistStars() }
-        exact=[];similar=[];guards=[:];mode.selectItem(at:0);setBusy(false);modeChanged()
+        reviewed.forget(paths:moved) // a file in Trash is not "kept"; if it comes back it is reviewed again
+        exact=[];similar=[];guards=[:];mode.selectItem(at:0);setBusy(false);modeChanged();updateSpaceLabel()
         if !shown.isEmpty {let next=min(max(nextRow,0),shown.count-1);table.selectRowIndexes(IndexSet(integer:next),byExtendingSelection:false);table.scrollRowToVisible(next)}
         status.stringValue="\(result.tickets.count) " + L("moved to Trash","הועברו לפח")
         if !result.failures.isEmpty {show(L("Some files need attention","יש קבצים שדורשים בדיקה"),result.failures.map{$0.url.lastPathComponent+": "+$0.message}.joined(separator:"\n"))}
@@ -1021,7 +1144,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
                 }
             }
         }
-        exact=[];similar=[];mode.selectItem(at:0);modeChanged()
+        exact=[];similar=[];mode.selectItem(at:0);modeChanged();updateSpaceLabel()
         var text="\(result.restored.count) " + L("restored","שוחזרו")
         if history.blockedCount>0 {text += " · \(history.blockedCount) " + L("waiting in Trash · Retry restore","ממתינים בפח · נסה לשחזר שוב")}
         status.stringValue=text
@@ -1051,6 +1174,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(Self.presetURL(6,home:temp) == nil)
             setBusy(true);precondition(locationButtons.allSatisfy{ !$0.isEnabled });setBusy(false)
             precondition(locationButtons.allSatisfy{ $0.isEnabled })
+            precondition(overviewMode && !overviewPanel.isHidden && previewHostView.isHidden && !overviewPanel.volumes.isEmpty && overviewPanel.volumes[0].isStartup,"The app opens on the overview with real volume capacities")
+            precondition(sidebarOverview.contentTintColor == .controlAccentColor && sidebarMap.contentTintColor != .controlAccentColor,"Overview is highlighted in the sidebar")
+            setOverview(false) // the rest of the smoke drives the file review directly, as choosing a location would
             preferences.set(temp.path,forKey:"lastFolder");refreshEmptyState();precondition(!continueLink.isHidden && continueLink.stringValue.hasSuffix(displayPath(temp)),"Empty state offers to continue with the last folder")
             root = temp
             files = try Scanner.scan(root:temp, token:CancellationToken()).files
@@ -1160,6 +1286,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             let reviewRoot=root!;let bigPath=mapFolder.appendingPathComponent("Big").resolvingSymlinksInPath().path
             startMap(mapFolder);settle()
             precondition(mapMode && !mapPanel.isEmpty && scroll.isHidden && !mapPanel.isHidden && emptyList.isHidden && !mapPanel.detail.isHidden)
+            precondition(!overviewMode && overviewPanel.isHidden && sidebarMap.contentTintColor == .controlAccentColor && locationButtons.allSatisfy{ $0.contentTintColor != .controlAccentColor },"In the map only the map entry is highlighted, never a location")
+            showOverview();precondition(overviewMode && mapPanel.isHidden && sidebarOverview.contentTintColor == .controlAccentColor);showStorageMap();precondition(mapMode && !overviewMode && mapPanel.current != nil,"Storage map from the overview returns to the last map without re-measuring")
             precondition(mapPanel.rows.map(\.title) == ["Big","Small",L("Files in this folder","קבצים בתיקייה עצמה")],"Map rows sort by size: \(mapPanel.rows.map(\.title))")
             precondition(mapPanel.table.selectedRow == 0 && mapPanel.reviewTarget?.path == bigPath && mapPanel.openButton.isEnabled)
             precondition(status.stringValue.contains("4 "+L("files","קבצים")) && status.stringValue.contains("2 "+L("folders","תיקיות")),status.stringValue)
@@ -1173,6 +1301,23 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(!mapMode && root?.path == bigPath && files.count == 1 && files[0].name == "large.bin" && !scroll.isHidden && mapPanel.isHidden,"Review files here hands the folder to file review")
             showStorageMap();precondition(mapMode && mapPanel.current?.name == "Big" && mapPanel.result != nil,"Return to the map without re-mapping")
             showStorageMap();precondition(!mapMode && root?.path == bigPath,"Back to files")
+            // Largest files: the map hands its biggest files to review; Refresh re-measures the map and rebuilds the same view.
+            let mapRootPath=mapFolder.resolvingSymlinksInPath().path
+            showStorageMap();precondition(mapMode && mapPanel.largestButton.isEnabled && mapPanel.current?.name == "Big");mapPanel.goUp();precondition(mapPanel.current?.name == "map")
+            precondition(mapPanel.largestFiles(in:mapPanel.result!.root,directOnly:false).map{$0.url.lastPathComponent}.first == "large.bin" && mapPanel.largestFiles(in:mapPanel.result!.root,directOnly:true).map{$0.url.lastPathComponent} == ["loose.txt"],"Details list the largest files of the folder")
+            reviewLargestFiles()
+            precondition(!mapMode && reviewSource == .largestFiles && root?.path == mapRootPath && !scroll.isHidden && mapPanel.isHidden,"Largest files opens file review on the map root")
+            precondition(files.count == 4 && shown.first?.name == "large.bin" && zip(shown,shown.dropFirst()).allSatisfy{$0.allocatedBytes >= $1.allocatedBytes},"Largest first: \(shown.map(\.name))")
+            precondition(folderLabel.stringValue == mapRootPath+" · "+L("largest files","הקבצים הגדולים") && sortPicker.indexOfSelectedItem == ReviewSort.largest.rawValue && mode.indexOfSelectedItem == 0 && table.selectedRow == 0,folderLabel.stringValue)
+            precondition(status.stringValue.hasPrefix("4 ") && !spaceLabel.isHidden && !isCurrentRoot(mapFolder),status.stringValue)
+            rescanFolder();precondition(busy && pendingLargestReview,"Refresh in the largest-files view re-measures the map");settle()
+            precondition(!mapMode && reviewSource == .largestFiles && !pendingLargestReview && files.count == 4 && shown.first?.name == "large.bin" && folderLabel.stringValue.hasSuffix(L("largest files","הקבצים הגדולים")),"Refresh rebuilds the largest-files view")
+            // Return on the loose-files row reviews the folder it belongs to, like "Review files here".
+            showStorageMap();precondition(mapMode && mapPanel.current?.name == "map")
+            mapPanel.table.selectRowIndexes(IndexSet(integer:mapPanel.rows.firstIndex{ !$0.isFolder }!),byExtendingSelection:false)
+            let mapReturn=NSEvent.keyEvent(with:.keyDown,location:.zero,modifierFlags:[],timestamp:0,windowNumber:window.windowNumber,context:nil,characters:"\r",charactersIgnoringModifiers:"\r",isARepeat:false,keyCode:36)!
+            mapPanel.table.keyDown(with:mapReturn);settle()
+            precondition(!mapMode && reviewSource == .scan && root?.path == mapRootPath && files.count == 4,"Return on the loose-files row reviews the current folder and a scan resets the source")
             // Stop: a big synthetic tree is scanned, Esc stops it, partial results stay and Refresh comes back.
             let bigTree=temp.appendingPathComponent("many",isDirectory:true)
             for i in 0..<40 { let d=bigTree.appendingPathComponent("d\(i)");try FileManager.default.createDirectory(at:d,withIntermediateDirectories:true);for j in 0..<60 { try Data("x".utf8).write(to:d.appendingPathComponent("f\(j).txt")) } }
@@ -1181,6 +1326,34 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(!busy && rescanButton.title == L("Refresh","רענן") && rescanButton.action == #selector(rescanFolder) && files.count <= 2400,"Stopping keeps partial results and restores Refresh: \(status.stringValue)")
             try FileManager.default.removeItem(at:bigTree)
             startScan(reviewRoot);settle();precondition(!mapMode && root?.path == reviewRoot.resolvingSymlinksInPath().path)
+            // Installers & archives: only disk images, packages and archives older than the cutoff; the badge names the family.
+            let installerURLs=["old.dmg","old.zip","new.dmg","photo.jpg"].map{ temp.appendingPathComponent($0) }
+            for u in installerURLs { try Data("synthetic".utf8).write(to:u) }
+            for u in installerURLs.prefix(2) { try FileManager.default.setAttributes([.modificationDate:Date(timeIntervalSince1970:946684800)],ofItemAtPath:u.path) }
+            let installerFixtures=try installerURLs.map{ try FileRecord(url:$0) };files += installerFixtures
+            mode.selectItem(at:4);agePicker.selectItem(at:1);modeChanged()
+            precondition(Set(shown.map(\.name)) == ["old.dmg","old.zip"] && !agePicker.isHidden && !ageHint.isHidden && ageHint.stringValue == Self.installerHintText,"Installers view: \(shown.map(\.name))")
+            table.selectRowIndexes(IndexSet(integer:shown.firstIndex{ $0.name == "old.dmg" }!),byExtendingSelection:false)
+            precondition(kindBadge.stringValue.contains(Self.installerTitle(.diskImage).uppercased()) && kindBadge.textColor == .systemIndigo,"Disk image badge: \(kindBadge.stringValue)")
+            setMapMode(true);showInstallers();precondition(!mapMode && mode.indexOfSelectedItem == 4 && shown.count == 2,"Installers from the sidebar leaves map mode")
+            mode.selectItem(at:0);modeChanged();precondition(ageHint.isHidden && ageHint.stringValue == Self.ageHintText)
+            files.removeAll{ f in installerFixtures.contains{ $0.id == f.id } };for u in installerURLs { try FileManager.default.removeItem(at:u) };applyFilters()
+            // Reviewed and kept: K toggles, the filter partitions the list, Keep & next remembers, a star outranks the checkmark.
+            starFilter.selectItem(at:0);sortPicker.selectItem(at:ReviewSort.name.rawValue);changeSort();reviewed.unmark(files);applyFilters()
+            let kKey=NSEvent.keyEvent(with:.keyDown,location:.zero,modifierFlags:[],timestamp:0,windowNumber:window.windowNumber,context:nil,characters:"k",charactersIgnoringModifiers:"k",isARepeat:false,keyCode:40)!
+            table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false);let kept=shown[0];let everyone=shown.count
+            table.keyDown(with:kKey);precondition(reviewed.isReviewed(kept) && (preferences.dictionary(forKey:"reviewedFiles") as? [String:String])?[kept.id] != nil,"K marks the selection as reviewed and persists it")
+            precondition(selectionLabel.stringValue.hasSuffix(L("reviewed","נסקר")),"Selection label: \(selectionLabel.stringValue)")
+            precondition((tableView(table,viewFor:table.tableColumns[0],row:0) as? NSButton)?.contentTintColor == .systemGreen,"Reviewed files show a green checkmark")
+            setStar(kept,true);precondition((tableView(table,viewFor:table.tableColumns[0],row:0) as? NSButton)?.contentTintColor == .systemYellow,"A star outranks the reviewed mark");setStar(kept,false)
+            starFilter.selectItem(at:4);applyFilters();precondition(shown.map(\.id) == [kept.id],"Reviewed only")
+            starFilter.selectItem(at:3);applyFilters();precondition(shown.count == everyone-1 && !shown.contains{ $0.id == kept.id },"Not yet reviewed")
+            table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false);let left=shown[0];let follower=shown[1];nextFile()
+            precondition(reviewed.isReviewed(left) && shown.count == everyone-2 && table.selectedRow == 0 && shown[0].id == follower.id,"Keep & next marks the file it left and steps to the next unreviewed one")
+            starFilter.selectItem(at:0);applyFilters();table.selectRowIndexes(IndexSet(integer:shown.firstIndex{ $0.id == kept.id }!),byExtendingSelection:false)
+            table.keyDown(with:kKey);precondition(!reviewed.isReviewed(kept),"K again clears the mark")
+            let checkCell=tableView(table,viewFor:table.tableColumns[0],row:shown.firstIndex{ $0.id == left.id }!) as! NSButton
+            precondition(checkCell.action == #selector(reviewedClicked(_:)));reviewedClicked(checkCell);precondition(!reviewed.isReviewed(left),"Clicking the checkmark clears the mark")
             precondition(!history.canUndo && !history.canRedo)
             let alert=makeTrashAlert([files[0]]);precondition(alert.showsSuppressionButton && alert.suppressionButton?.state == .off)
             struct FixtureTrash: TrashBackend {
@@ -1202,10 +1375,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
                 let event=NSEvent.keyEvent(with:.keyDown,location:.zero,modifierFlags:flags,timestamp:0,windowNumber:window.windowNumber,context:nil,characters:"",charactersIgnoringModifiers:"",isARepeat:repeated,keyCode:code)!
                 table.keyDown(with:event);settle()
             }
+            let targetRecord=selectedFiles[0];reviewed.mark([targetRecord])
             key(51);precondition(!FileManager.default.fileExists(atPath:target.path) && history.canUndo)
+            precondition(!reviewed.isReviewed(targetRecord) && (preferences.dictionary(forKey:"reviewedFiles") as? [String:String])?[targetRecord.id] == nil,"Trash forgets the reviewed mark")
+            precondition(!spaceLabel.isHidden && totalMovedBytes == targetRecord.allocatedBytes && spaceLabel.stringValue.contains(bytes(targetRecord.allocatedBytes)),"Space summary after Trash: \(spaceLabel.stringValue)")
             precondition(mapStale && !mapPanel.rescanButton.isHidden,"Moving files marks the last map as out of date")
             let count=files.count;key(51,[],true);precondition(files.count == count,"Held Delete must not trash the next file")
             key(6,[.command]);precondition(FileManager.default.fileExists(atPath:target.path) && history.canRedo)
+            precondition(spaceLabel.stringValue.contains(L("Nothing moved to Trash yet","עדיין לא הועבר דבר לפח")),"Undo drops the session total: \(spaceLabel.stringValue)")
             key(6,[.command,.shift]);precondition(!FileManager.default.fileExists(atPath:target.path) && history.canUndo)
             key(6,[.command]);precondition(FileManager.default.fileExists(atPath:target.path))
             // Blocked restore: a newcomer at the original path is never overwritten, earlier batches stay undoable, and Retry restore succeeds once the path is free.
@@ -1232,7 +1409,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(preferences.bool(forKey:"AppleTextDirection"),"Hebrew must switch the layout direction")
             chooseLanguage(languageItems[0]);precondition(preferences.stringArray(forKey:"AppleLanguages") == ["en"] && !preferences.bool(forKey:"AppleTextDirection"))
             precondition(isCurrentRoot(root!) && !isCurrentRoot(temp.appendingPathComponent("map")),"Clicking the loaded location again must not rescan")
-            print("UI smoke: storage map, selection, old-file sorting, preview, confirmation preference, Delete, Undo, Redo, blocked-restore retry and held-key protection passed. No real files changed; no windows shown.")
+            print("UI smoke: storage map, largest files, installers, reviewed marks, session space summary, selection, old-file sorting, preview, confirmation preference, Delete, Undo, Redo, blocked-restore retry and held-key protection passed. No real files changed; no windows shown.")
             cleanup();fflush(stdout);exit(0)
         } catch { fputs("UI smoke failed: \(error)\n",stderr);cleanup();exit(1) }
     }

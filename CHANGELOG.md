@@ -4,6 +4,10 @@
 
 - The storage map shows a Rescan button and says its numbers are out of date after files are moved to Trash or restored.
 - The Resume button is gone; the empty screen offers "Continue: ~/folder" for the last folder instead.
+- Largest files: a button in the storage map hands the largest files under the mapped folder (up to 200, same exclusions as file review) to file review, largest first, with the mapped folder as the root; Refresh there measures the map again. The map's details pane names up to five files inside the highlighted folder that are among the mapped folder's 200 largest, and Return on the "Files in this folder" row reviews that folder.
+- Installers & archives: a sidebar button and review mode listing disk images, installer packages and archives not modified within the chosen cutoff, by file extension only; the type badge names the family. Nothing is auto-selected.
+- Reviewed and kept: K, the check in the star column or Keep & next marks files you decided to keep (stored in this app's preferences by path with the file's size and modification time, so a rewritten file reappears). The star filter adds "Not yet reviewed" and "Reviewed only"; a move to Trash forgets the mark. A star still shows ahead of the check.
+- Session space summary in the bottom row: allocated bytes moved to Trash this session (less what Undo restored) next to the free space macOS reports for the volume, side by side, not as a prediction.
 
 ## 0.1.0-beta.8
 

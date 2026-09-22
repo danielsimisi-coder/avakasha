@@ -8,7 +8,14 @@ public struct RestoreTicket {
 }
 public struct FileFailure { public let url: URL; public let message: String }
 public struct MoveResult { public let tickets: [RestoreTicket]; public let failures: [FileFailure] }
-public struct RestoreResult { public let restored: [URL]; public let pending: [RestoreTicket]; public let failures: [FileFailure] }
+public struct RestoreResult {
+    public let restored: [URL]; public let pending: [RestoreTicket]; public let failures: [FileFailure]
+    /// Whole-folder restores that hit a conflict and wait for a retry.
+    public let pendingFolders: [FolderTicket]
+    public init(restored: [URL], pending: [RestoreTicket], failures: [FileFailure], pendingFolders: [FolderTicket] = []) {
+        self.restored = restored; self.pending = pending; self.failures = failures; self.pendingFolders = pendingFolders
+    }
+}
 
 public protocol TrashBackend {
     func moveToTrash(_ url: URL) throws -> URL

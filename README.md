@@ -29,6 +29,8 @@ In one sentence: Keepelix is a Mac app that helps you free up space by showing w
 
 Click **Storage map** in the sidebar and choose a folder or a drive (your home folder is a good start). Keepelix measures every folder below it and lists them largest first, with a share bar and notes. Open a folder to go deeper; press **Review files here** to switch to the file review of that folder, sorted by size. **Back to files** returns to the list, and **Storage map** in the header jumps back to the map at the folder you are reviewing, without measuring again. After you move or restore files the map shows a **Rescan** button and says its numbers are out of date; Refresh in the header does the same.
 
+**Largest files** in the map toolbar hands the largest files found anywhere under the mapped folder (up to 200, the same read-only rules as file review: no bundle contents, hidden files, cloud placeholders or app databases) to file review as one list, largest first, with the mapped folder as the review root. The folder label reads "path · largest files" and the status line says how many were listed. The map's details pane also names up to five files inside the highlighted folder that are among the mapped folder's 200 largest, or among the loose files of the current folder; a folder with none of them shows no list. Older files and Installers in this view filter only the listed largest files; choose the location in the sidebar for the full folder. Refresh in this view measures the map again and rebuilds the list; clicking the same location in the sidebar starts a full scan instead. Return on the "Files in this folder" row reviews that folder, like Review files here.
+
 The map is read-only. It never moves anything; Delete does nothing there. It reports what it could not measure instead of guessing:
 
 - **Not accessible** folders (permissions or protected locations) are listed with a lock and counted separately.
@@ -65,6 +67,8 @@ The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
 | Right-click to reveal the original in Finder; drag rows out to Finder, WhatsApp or any window (copies) | Hidden, protected and bundle folders are labelled in the map | Progress, cancellation and per-file errors |
 | WhatsApp media filter: group chats, personal chats, status (by folder name only) | | |
 | The empty screen offers to continue with your last folder | Hard links are not treated as extra copies | No private file inventory in the app bundle |
+| Largest files from the storage map: the biggest files under the mapped folder as one review list | Installers & archives: disk images, packages and archives not modified for 6 months to 5 years, by extension only, never auto-selected | Reviewed and kept (K, Keep & next): remember files you decided to keep; a local mark, not a lock |
+| Not yet reviewed and Reviewed only choices in the star filter | | Session summary: bytes moved to Trash this session next to the free space macOS reports for the volume |
 
 ## Try the beta
 
@@ -72,8 +76,10 @@ The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
 
 1. Get the ZIP from [Releases](https://github.com/danielsimisi-coder/keepelix/releases), extract it, and open Keepelix.
 2. Click **Storage map** to see which folders fill a folder or drive, then **Review files here**. Or click **WhatsApp**, **Downloads**, **Movies**, **Pictures**, **Documents** or **Desktop**, or choose **Other folder or drive**. Each scans only the selected location. WhatsApp checks its local media folder on click and offers a folder picker if unavailable; no account connection is needed. Pictures skips Photos library packages.
-3. Select a row; the preview is open by default. **Space** plays or pauses a video. Use **↓** or **Keep & next** to continue. Clicking a location that is already loaded shows it again without rescanning; **Refresh** rescans.
+3. Select a row; the preview is open by default. **Space** plays or pauses a video. Use **↓** to continue, or **Keep & next** to mark the file as reviewed and kept and continue. Clicking a location that is already loaded shows it again without rescanning; **Refresh** rescans.
 4. Use **⌘-click** or **Shift-click** to select several files. The count and size are shown before you confirm **Move to Trash**.
+
+**Reviewed and kept.** Press **K** to mark the selected files as reviewed and kept, or use **Keep & next** to mark the highlighted file and move on; a green check takes the place of the empty star (a star, set with **S**, still shows first). Click the check or press K again to clear it. The mark is kept by this app only, by path together with the file's size and modification time, so a file rewritten later shows up as new again. The star filter gains **Not yet reviewed** and **Reviewed only**; under Not yet reviewed, Keep & next removes the kept file from the list and the next one takes its row. Moving a file to Trash forgets its mark. A mark is a note, not a lock: it never prevents Trash.
 
 **Signing status:** the initial private beta is ad-hoc signed, **not Apple-notarized**. Gatekeeper may block a downloaded build. Do not disable Gatekeeper; building from source is the alternative until a Developer ID-signed, notarized release is available. See [distribution instructions](docs/DISTRIBUTION.md).
 
@@ -84,6 +90,7 @@ The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
 | `Space` | Play or pause a video; otherwise toggle the preview (open by default) |
 | `Esc` | Stop a running scan, map or comparison and keep partial results |
 | `S` | Star or unstar the selected files (kept by this app only; files are not changed) |
+| `K` | Mark or unmark the selected files as reviewed and kept (kept by this app only; files are not changed) |
 | `⌘C` | Copy the highlighted file's path (and the file, for pasting into Finder or a chat); right-click the path for the same |
 | `↑` / `↓` | Move through the list |
 | `⌘` + click | Add or remove a file from the selection |
@@ -121,7 +128,7 @@ Drag one or more highlighted rows to a Finder window, a WhatsApp conversation or
 - **Save important files elsewhere first.** Keepelix is not a backup tool.
 - **Close the owning app** before deleting its media. Removing WhatsApp or another application's files can leave missing attachments; future re-download is not guaranteed.
 - **Downloaded cloud files may sync deletions.** Undownloaded placeholders are skipped, but that does not make downloaded cloud content disposable.
-- **Trash is not free space yet.** Empty it yourself only after reviewing what you removed.
+- **Trash is not free space yet.** Empty it yourself only after reviewing what you removed. The summary in the bottom row shows the allocated bytes moved to Trash this session (Undo takes them off again) next to the free space macOS reports for the volume of the current location; the two are shown side by side, not as a prediction, because Trash keeps those blocks until emptied and APFS clones or snapshots can free a different amount.
 - **Undo is session-scoped.** After quitting, restore items through Finder Trash. Restores never overwrite an existing destination.
 - **A blocked restore does not block the rest.** If a file already occupies the original path, that item stays in Trash and waits under **Retry restore**; earlier batches remain available with Undo. Quitting with items waiting asks first.
 
@@ -158,7 +165,7 @@ docs/                    Privacy, safety, release and contributor guidance
 
 ## Status and contribution
 
-This is beta 8. Code compilation and automated tests are not substitutes for testing on every macOS version. The Intel slice is cross-built; real Intel-machine verification and clean-Mac Gatekeeper verification are release checklist items, not implied claims.
+This is beta 9. Code compilation and automated tests are not substitutes for testing on every macOS version. The Intel slice is cross-built; real Intel-machine verification and clean-Mac Gatekeeper verification are release checklist items, not implied claims.
 
 The interface is English by default. **Keepelix › Language › עברית** switches the whole app to Hebrew with right-to-left layout on the next launch (the choice is stored for this app only). Contributions to accessibility, localisation and synthetic-fixture coverage are welcome. See [CONTRIBUTING](CONTRIBUTING.md), [SECURITY](SECURITY.md), and [CHANGELOG](CHANGELOG.md).
 
@@ -175,6 +182,8 @@ Keepelix is available under the [MIT License](LICENSE).
 Choose a folder, then **Older files** in the sidebar. Filter files not modified in 6 months, 1 year, 2 years or 5 years. Sort by largest, smallest, oldest, newest or name; the Name, On disk and Last modified column headers also sort the list. Switching review views clears selection.
 
 “Old” means last modified before the selected cutoff. It does not mean you have not opened the file, and it never means the file is safe to delete automatically. The view remains limited to your chosen folder. The **Trash** shortcut opens your user Trash folder in Finder.
+
+**Installers** in the sidebar (the **Installers & archives** mode) uses the same cutoffs and shows only disk images (dmg, iso, sparseimage), installer packages (pkg, mpkg, xip) and archives (zip, tar, gz, tgz, bz2, xz, rar, 7z) not modified in that time, judged by file extension alone. The type badge names the family. Keepelix cannot know whether the app is already installed or the archive was ever extracted, so nothing is selected for you; keep them if in doubt.
 
 The Trash confirmation offers **Do not show again**. Re-enable it from **Keepelix → Confirm before Trash**. Undo and Redo also have buttons; successful actions update the status without extra popups. History lasts only for the current session.
 

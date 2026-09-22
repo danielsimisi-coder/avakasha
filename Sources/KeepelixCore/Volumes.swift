@@ -1,0 +1,45 @@
+import Foundation
+
+/// Capacity of one mounted volume. Read from volume attributes only; nothing inside the volume is listed.
+public struct VolumeInfo: Equatable {
+    public let url: URL
+    public let name: String
+    public let total: Int64
+    public let available: Int64
+    public let isInternal: Bool
+    public let isRemovable: Bool
+    public let isStartup: Bool
+    public init(url: URL, name: String, total: Int64, available: Int64, isInternal: Bool, isRemovable: Bool, isStartup: Bool) {
+        self.url = url; self.name = name; self.total = total; self.available = available; self.isInternal = isInternal; self.isRemovable = isRemovable; self.isStartup = isStartup
+    }
+    public var used: Int64 { max(0, total - available) }
+    public var usedFraction: Double { total > 0 ? min(1, Double(used) / Double(total)) : 0 }
+}
+
+public enum Volumes {
+    private static let keys: Set<URLResourceKey> = [.volumeNameKey, .volumeTotalCapacityKey, .volumeAvailableCapacityForImportantUsageKey, .volumeAvailableCapacityKey,
+                                                    .volumeIsInternalKey, .volumeIsRemovableKey, .volumeIsRootFileSystemKey, .volumeIsBrowsableKey, .volumeIsLocalKey, .volumeURLKey]
+
+    /// Browsable local volumes, startup disk first, then by name. "Free" is what the current user may still write
+    /// (purgeable space is not counted as used); Trash contents are not free until emptied.
+    public static func mounted() -> [VolumeInfo] {
+        guard let urls = FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: Array(keys), options: [.skipHiddenVolumes]) else { return [] }
+        var seen = Set<String>(); var result: [VolumeInfo] = []
+        for url in urls {
+            guard let info = info(at: url), seen.insert(info.url.path).inserted else { continue }
+            result.append(info)
+        }
+        return result.sorted { a, b in a.isStartup != b.isStartup ? a.isStartup : a.name.localizedStandardCompare(b.name) == .orderedAscending }
+    }
+
+    /// The volume that holds `url`, or nil when the path does not exist or is not a browsable local volume.
+    public static func info(at url: URL) -> VolumeInfo? {
+        guard let v = try? url.resourceValues(forKeys: keys), v.volumeIsLocal ?? false, v.volumeIsBrowsable ?? true,
+              let total = v.volumeTotalCapacity, total > 0 else { return nil }
+        let important = v.volumeAvailableCapacityForImportantUsage ?? 0
+        let available = important > 0 ? important : Int64(v.volumeAvailableCapacity ?? 0)
+        let volumeURL = v.volume ?? url
+        return VolumeInfo(url: volumeURL, name: v.volumeName ?? volumeURL.lastPathComponent, total: Int64(total), available: available,
+                          isInternal: v.volumeIsInternal ?? false, isRemovable: v.volumeIsRemovable ?? false, isStartup: v.volumeIsRootFileSystem ?? (volumeURL.path == "/"))
+    }
+}
