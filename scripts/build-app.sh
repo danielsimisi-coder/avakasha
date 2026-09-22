@@ -44,5 +44,5 @@ if [ -n "${NOTARY_PROFILE:-}" ]; then
   xcrun stapler validate "$app"
   ditto -c -k --keepParent "$app" "$archive"
 fi
-shasum -a 256 "$archive" > "$archive.sha256"
+(cd dist && shasum -a 256 "$(basename "$archive")") > "$archive.sha256"
 echo "$archive"
