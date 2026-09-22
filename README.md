@@ -32,7 +32,7 @@ No account. No cloud analysis. No automatic permanent deletion.
 **macOS 13 or later.** The release package contains a universal Apple Silicon + Intel app.
 
 1. Get the ZIP from [Releases](https://github.com/danielsimisi-coder/filetriage/releases), extract it, and open FileTriage.
-2. Choose a narrow folder of media or documents you recognise.
+2. Click **WhatsApp**, **Downloads**, **Movies**, **Pictures**, **Documents** or **Desktop**, or choose **Other folder or drive**. Each scans only the selected location. WhatsApp checks its local media folder on click and offers a folder picker if unavailable; no account connection is needed. Pictures skips Photos library packages.
 3. Select a row and press **Space**. Use **↓** or **Keep & next** to continue.
 4. Use **⌘-click** or **Shift-click** to select several files. The count and size are shown before you confirm **Move to Trash**.
 

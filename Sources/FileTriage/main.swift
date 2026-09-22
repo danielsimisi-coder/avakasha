@@ -44,6 +44,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     var primary: QLPreviewView!
     var comparison: QLPreviewView!
     var buttons: [NSButton] = []
+    var locationButtons: [NSButton] = []
     var cancelButton: NSButton!
     var undoButton: NSButton!
     var extrasButton: NSButton!
@@ -61,13 +62,26 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     var undoBatches: [(URL, [RestoreTicket])] = []
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 800), styleMask: [.titled,.closable,.miniaturizable,.resizable], backing: .buffered, defer: false)
+        window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 1280, height: 900), styleMask: [.titled,.closable,.miniaturizable,.resizable], backing: .buffered, defer: false)
         window.delegate = self
-        window.title = "FileTriage · 0.1.0 beta"; window.minSize = NSSize(width: 1040, height: 660); window.center()
+        window.title = "FileTriage · 0.1.0 beta"; window.minSize = NSSize(width: 1040, height: 780); window.center()
         func button(_ en: String, _ he: String, _ action: Selector) -> NSButton {
             let b = NSButton(title: L(en, he), target: self, action: action); buttons.append(b); return b
         }
-        let choose = button("Choose folder…", "בחר תיקייה…", #selector(chooseFolder))
+        let choose = button("Other folder or drive…", "תיקייה אחרת או כונן…", #selector(chooseFolder))
+        let locationTitle = NSTextField(labelWithString:L("Where would you like to review files?", "איפה תרצה לבדוק קבצים?"))
+        locationTitle.font = .boldSystemFont(ofSize:16)
+        let presets = [("WhatsApp","ווטסאפ","message"),("Downloads","הורדות","arrow.down.circle"),("Movies","סרטים","film"),("Pictures","תמונות","photo"),("Documents","מסמכים","doc"),("Desktop","שולחן העבודה","desktopcomputer")]
+        for (index,preset) in presets.enumerated() {
+            let b=button(preset.0,preset.1,#selector(chooseLocation(_:)));b.tag=index
+            b.bezelStyle = .rounded;b.controlSize = .large
+            b.image=NSImage(systemSymbolName:preset.2,accessibilityDescription:nil);b.imagePosition = .imageLeading
+            b.toolTip=L("Scan only this folder after you click. No files are deleted by scanning.","רק התיקייה הזו תיסרק אחרי הלחיצה. הסריקה לא מוחקת קבצים.")
+            b.setAccessibilityLabel(L(preset.0,preset.1));locationButtons.append(b)
+        }
+        let locations = NSStackView(views:locationButtons);locations.spacing=10;locations.distribution = .fillEqually
+        let locationHint = NSTextField(wrappingLabelWithString:L("Choose a location to scan. Nothing starts automatically. For another disk, use ‘Other folder or drive’. Pictures shows ordinary files, not the Photos library.","בחר מיקום לסריקה. שום דבר לא מתחיל אוטומטית. לדיסק נוסף: ׳תיקייה אחרת או כונן׳. תמונות מציג קבצים רגילים, ולא את ספריית Photos."))
+        locationHint.textColor = .secondaryLabelColor
         let resume = button("Resume", "המשך מהמקום שעצרתי", #selector(resumeFolder))
         let rescan = button("Rescan", "סרוק שוב", #selector(rescanFolder))
         let findExact = button("Exact duplicates", "כפילויות זהות", #selector(findExactDuplicates))
@@ -110,9 +124,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let split = NSSplitView(); split.isVertical = true; split.dividerStyle = .thin; split.addArrangedSubview(scroll); split.addArrangedSubview(previews)
         scroll.widthAnchor.constraint(greaterThanOrEqualToConstant: 440).isActive = true
         previews.widthAnchor.constraint(greaterThanOrEqualToConstant: 320).isActive = true
-        let stack = NSStackView(views: [actions,folderLabel,filters,review,selectionLabel,hint,warning,status,split]); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 9
+        let stack = NSStackView(views: [locationTitle,locations,locationHint,actions,folderLabel,filters,review,selectionLabel,hint,warning,status,split]); stack.orientation = .vertical; stack.alignment = .leading; stack.spacing = 9
         stack.translatesAutoresizingMaskIntoConstraints = false; window.contentView!.addSubview(stack)
-        NSLayoutConstraint.activate([stack.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor, constant: 16), stack.trailingAnchor.constraint(equalTo: window.contentView!.trailingAnchor, constant: -16), stack.topAnchor.constraint(equalTo: window.contentView!.topAnchor, constant: 16), stack.bottomAnchor.constraint(equalTo: window.contentView!.bottomAnchor, constant: -16), split.widthAnchor.constraint(equalTo: stack.widthAnchor), split.heightAnchor.constraint(greaterThanOrEqualToConstant: 280), hint.widthAnchor.constraint(equalTo: stack.widthAnchor), warning.widthAnchor.constraint(equalTo: stack.widthAnchor), folderLabel.widthAnchor.constraint(equalTo: stack.widthAnchor)])
+        NSLayoutConstraint.activate([locations.widthAnchor.constraint(equalTo:stack.widthAnchor),locationHint.widthAnchor.constraint(equalTo:stack.widthAnchor),stack.leadingAnchor.constraint(equalTo: window.contentView!.leadingAnchor, constant: 16), stack.trailingAnchor.constraint(equalTo: window.contentView!.trailingAnchor, constant: -16), stack.topAnchor.constraint(equalTo: window.contentView!.topAnchor, constant: 16), stack.bottomAnchor.constraint(equalTo: window.contentView!.bottomAnchor, constant: -16), split.widthAnchor.constraint(equalTo: stack.widthAnchor), split.heightAnchor.constraint(greaterThanOrEqualToConstant: 280), hint.widthAnchor.constraint(equalTo: stack.widthAnchor), warning.widthAnchor.constraint(equalTo: stack.widthAnchor), folderLabel.widthAnchor.constraint(equalTo: stack.widthAnchor)])
         makeMenus(); modeChanged(); updateEnabled()
         status.stringValue = L("Choose a folder to start. No folder is scanned automatically.","בחר תיקייה כדי להתחיל. הסריקה אינה מתחילה אוטומטית.")
         if smokeMode { runSmokeTests(); return }
@@ -137,6 +151,28 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         guard !busy else { return }; let p=NSOpenPanel();p.canChooseDirectories=true;p.canChooseFiles=false;p.allowsMultipleSelection=false
         p.message=L("Choose only the folder you want to review. No files are uploaded.","בחר רק את התיקייה שתרצה לבדוק. שום קובץ לא מועלה לרשת.")
         if p.runModal() == .OK, let u=p.url { startScan(u) }
+    }
+    static func presetURL(_ index:Int, home:URL) -> URL? {
+        let paths=["Library/Group Containers/group.net.whatsapp.WhatsApp.shared/Message/Media", "Downloads", "Movies", "Pictures", "Documents", "Desktop"]
+        guard paths.indices.contains(index) else { return nil }
+        return home.appendingPathComponent(paths[index],isDirectory:true)
+    }
+    @objc func chooseLocation(_ sender:NSButton) {
+        guard !busy, let suggested=Self.presetURL(sender.tag,home:FileManager.default.homeDirectoryForCurrentUser) else { return }
+        let candidate:URL
+        if sender.tag == 0, let saved=preferences.string(forKey:"whatsAppMediaFolder") { candidate=URL(fileURLWithPath:saved,isDirectory:true) }
+        else { candidate=suggested }
+        var directory:ObjCBool=false
+        if FileManager.default.fileExists(atPath:candidate.path,isDirectory:&directory),directory.boolValue {
+            startScan(candidate);return
+        }
+        let picker=NSOpenPanel();picker.canChooseDirectories=true;picker.canChooseFiles=false;picker.allowsMultipleSelection=false
+        picker.title=L("Locate ","בחר מיקום עבור ")+sender.title
+        picker.message = sender.tag == 0 ? L("WhatsApp media was not found or is not accessible. Choose its Media folder. No account connection is needed; chat databases are skipped.","תיקיית המדיה של ווטסאפ לא נמצאה או אינה נגישה. בחר את תיקיית Media שלה. לא נדרש חיבור לחשבון; מסדי נתונים של שיחות אינם נסרקים.") : L("This folder was not found or is not accessible. Choose its location.","התיקייה לא נמצאה או אינה נגישה. בחר את המיקום שלה.")
+        if picker.runModal() == .OK,let url=picker.url {
+            if sender.tag == 0 { preferences.set(url.path,forKey:"whatsAppMediaFolder") }
+            startScan(url)
+        }
     }
     @objc func resumeFolder() {
         guard !busy else { return }
@@ -173,7 +209,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         groupPicker.removeAllItems();groupPicker.addItem(withTitle:L("All groups","כל הקבוצות"))
         for (i,g) in currentGroups.enumerated(){groupPicker.addItem(withTitle:"\(i+1) · \(g.members.count) files")}
         groupPicker.isHidden=mode.indexOfSelectedItem==0;comparison.isHidden=mode.indexOfSelectedItem==0
-        guards=[:];applyFilters();updateEnabled()
+        table.deselectAll(nil);guards=[:];applyFilters();updateEnabled()
     }
     @objc func applyFilters() {
         let old=Set(selectedFiles.map(\.id));let threshold:[Int64]=[0,10_000_000,100_000_000,1_000_000_000]
@@ -281,6 +317,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             for (name, text) in [("coast-notes.txt", "Synthetic duplicate fixture"), ("coast-notes-copy.txt", "Synthetic duplicate fixture"), ("readme.txt", "Unrelated synthetic example")] {
                 try Data(text.utf8).write(to: temp.appendingPathComponent(name))
             }
+            precondition(locationButtons.count == 6 && locationButtons.map(\.tag) == Array(0..<6))
+            precondition(Self.presetURL(0,home:temp)!.path.hasSuffix("Message/Media"))
+            precondition(Self.presetURL(1,home:temp) == temp.appendingPathComponent("Downloads",isDirectory:true))
+            precondition(Self.presetURL(6,home:temp) == nil)
+            setBusy(true);precondition(locationButtons.allSatisfy{ !$0.isEnabled });setBusy(false)
+            precondition(locationButtons.allSatisfy{ $0.isEnabled })
             root = temp
             files = try Scanner.scan(root:temp, token:CancellationToken()).files
             sizeFilter.selectItem(at:0); applyFilters()
@@ -298,6 +340,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             mode.selectItem(at:1);modeChanged();selectExtras()
             precondition(selectedFiles.count == 1 && guards.count == 1)
             let extra = selectedFiles[0];precondition(!guards.values.contains(where:{$0.id == extra.id}))
+            mode.selectItem(at:0);modeChanged()
+            precondition(selectedFiles.isEmpty && guards.isEmpty,"Changing mode must clear guarded selections")
+            mode.selectItem(at:1);modeChanged();selectExtras()
+            precondition(selectedFiles.count == 1 && guards.count == 1)
             // Exercise the real AppKit table menu on synthetic rows; do not invoke Finder.
             window.contentView!.layoutSubtreeIfNeeded()
             let row = min(1,shown.count-1)

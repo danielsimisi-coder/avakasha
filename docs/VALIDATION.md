@@ -16,3 +16,5 @@ Local evidence: 20 core cases and the hidden UI smoke passed; an additional opt-
 The first independent pass led to these changes: filtering clears a vanished selection; confirmations list all paths; Trash checks the moved identity and attempts safe rollback; duplicate actions re-hash both files, protect a selected keeper and compare extended attributes/permissions; similar groups retain their comparison anchor; oversized image inputs are skipped and cancelled read-only work can quit; the audit rejects an empty index; Quick Look's OS boundary is stated explicitly.
 
 The primary preview follows the first selected row in display order. A multi-selection's last-clicked row is not separately tracked. This is a known interaction limitation; the confirmation lists every target independently of preview order.
+
+The final independent pass identified a mode-transition keeper-guard bug. Changing view mode now clears selection before clearing guards; the hidden UI regression exercises the exact transition. No additional independent pass was claimed after that fix. All 21 core/integration tests and the updated hidden UI regression passed locally.

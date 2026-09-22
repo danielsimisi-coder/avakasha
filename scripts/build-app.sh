@@ -38,13 +38,13 @@ else
 fi
 codesign --verify --strict "$app"
 archive="dist/FileTriage-$version-universal.zip"
-ditto -c -k --keepParent "$app" "$archive"
+ditto --norsrc --noextattr -c -k --keepParent "$app" "$archive"
 if [ -n "${NOTARY_PROFILE:-}" ]; then
   test -n "${SIGN_IDENTITY:-}" || { echo 'NOTARY_PROFILE requires SIGN_IDENTITY'; exit 1; }
   xcrun notarytool submit "$archive" --keychain-profile "$NOTARY_PROFILE" --wait
   xcrun stapler staple "$app"
   xcrun stapler validate "$app"
-  ditto -c -k --keepParent "$app" "$archive"
+  ditto --norsrc --noextattr -c -k --keepParent "$app" "$archive"
 fi
 (cd dist && shasum -a 256 "$(basename "$archive")") > "$archive.sha256"
 echo "$archive"

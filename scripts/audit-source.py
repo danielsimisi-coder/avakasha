@@ -1,31 +1,66 @@
 #!/usr/bin/env python3
-"""Fail closed on common accidental personal payloads in the tracked project."""
+"""Audit tracked source and every reachable Git blob; report locations, never secret values."""
+import hashlib
 import pathlib
 import re
 import subprocess
 
 root = pathlib.Path(__file__).resolve().parents[1]
-paths = subprocess.check_output(['git', 'ls-files', '-z'], cwd=root).decode().split('\0')
+artwork = {
+    'assets/icon-1024.png': '95ff2ed3079abdc2143948ec1586c53a19fbdeb30ecbefa06d37c99f2129531b',
+    'assets/AppIcon.icns': '9f603b3652db574dae84fa3b67f738a1455618a58590204bdee54be5f574dc97',
+}
 failures = []
-if not any(paths):
-    raise SystemExit("No tracked files: stage intended sources before auditing.")
-for relative in filter(None, paths):
-    path = root / relative
-    if not path.is_file():
-        continue
-    if path.name in {'media.json', 'auth.json', '.env'} or path.suffix in {'.sqlite', '.db', '.p12', '.pem'}:
-        failures.append(relative + ': private payload type')
-    if path.suffix.lower() in {'.png', '.icns'}:
-        continue  # committed artwork must be synthetic; inspect it during review
-    data = path.read_bytes()
+patterns = [
+    (rb'/Users/[A-Za-z0-9_][^/\s]*/', 'machine-specific home path'),
+    (rb'(?:ghp_|github_pat_|sk-proj-)[A-Za-z0-9_]{16,}', 'possible credential'),
+    (rb'AKIA[0-9A-Z]{16}', 'possible cloud credential'),
+    (rb'-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----', 'private key'),
+]
+
+def check(relative, data, label):
+    path = pathlib.PurePosixPath(relative)
+    if path.name in {'media.json', 'auth.json', '.env'} or path.name.startswith('.env.') or path.suffix.lower() in {'.sqlite', '.db', '.p12', '.pem', '.zip', '.csv', '.mp4', '.mov', '.jpg', '.jpeg', '.pdf'}:
+        failures.append(label + ': private payload type')
+    if relative in artwork:
+        if hashlib.sha256(data).hexdigest() != artwork[relative]:
+            failures.append(label + ': artwork differs from reviewed synthetic asset')
+        return
     if b'\x00' in data:
-        failures.append(relative + ': unexpected binary')
+        failures.append(label + ': unexpected binary')
+        return
+    for pattern, reason in patterns:
+        if re.search(pattern, data):
+            failures.append(label + ': ' + reason)
+
+entries = subprocess.check_output(['git', 'ls-files', '--stage', '-z'], cwd=root).decode().split('\0')
+if not any(entries):
+    raise SystemExit('No tracked files: stage intended sources before auditing.')
+count = 0
+for entry in filter(None, entries):
+    metadata, relative = entry.split('\t', 1)
+    path = root / relative
+    if metadata.split()[0] not in {'100644', '100755'} or path.is_symlink():
+        failures.append(relative + ': unsupported file mode or symbolic link')
         continue
-    text = data.decode('utf-8', errors='replace')
-    if re.search(r'/Users/[A-Za-z][^/\s]*/', text):
-        failures.append(relative + ': machine-specific home path')
-    if re.search(r'(?:ghp_|github_pat_|sk-proj-)[A-Za-z0-9_]{16,}', text):
-        failures.append(relative + ': possible credential')
+    if not path.is_file():
+        failures.append(relative + ': tracked file missing')
+        continue
+    check(relative, path.read_bytes(), relative)
+    count += 1
+
+# Historical secrets remain exposed even after deletion from the working tree.
+head = subprocess.run(['git', 'rev-parse', '--verify', 'HEAD'], cwd=root, capture_output=True)
+blobs = 0
+if head.returncode == 0:
+    objects = subprocess.check_output(['git', 'rev-list', '--objects', '--all'], cwd=root).decode().splitlines()
+    for line in objects:
+        oid, _, name = line.partition(' ')
+        kind = subprocess.check_output(['git', 'cat-file', '-t', oid], cwd=root).strip()
+        if kind != b'blob':
+            continue
+        check(name, subprocess.check_output(['git', 'cat-file', 'blob', oid], cwd=root), 'history ' + oid[:10] + ' ' + name)
+        blobs += 1
 if failures:
     raise SystemExit('\n'.join(failures))
-print('Tracked-source audit passed. No personal inventories, home paths or detected credentials.')
+print(f'Audit passed: {count} tracked files and {blobs} historical blobs. Approved author/contact credits are intentional. Pattern scanning is not proof of absence of every secret.')
