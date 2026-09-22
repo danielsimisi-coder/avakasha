@@ -19,7 +19,8 @@ final class ShareBar: NSView {
         let track = NSRect(x: 0, y: bounds.midY - 4, width: bounds.width, height: 8)
         NSColor.quaternaryLabelColor.setFill(); NSBezierPath(roundedRect: track, xRadius: 4, yRadius: 4).fill()
         let width = max(fraction > 0 ? 8 : 0, track.width * CGFloat(min(max(fraction, 0), 1)))
-        NSColor.controlAccentColor.setFill(); NSBezierPath(roundedRect: NSRect(x: 0, y: track.minY, width: width, height: 8), xRadius: 4, yRadius: 4).fill()
+        let x = userInterfaceLayoutDirection == .rightToLeft ? track.width - width : 0
+        NSColor.controlAccentColor.setFill(); NSBezierPath(roundedRect: NSRect(x: x, y: track.minY, width: width, height: 8), xRadius: 4, yRadius: 4).fill()
     }
 }
 

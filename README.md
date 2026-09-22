@@ -9,7 +9,7 @@
 
 <p align="center"><strong>See what fills your Mac. Review it with your eyes and your keyboard.</strong><br>Map a folder or drive. Open the folder that takes the space. Preview each file. Keep it or move it to Trash. Continue.</p>
 
-<p align="center"><a href="https://github.com/danielsimisi-coder/keepelix/releases">Releases</a> · <a href="docs/DISTRIBUTION.md">Build from source</a> · <a href="docs/PRIVACY.md">Privacy</a> · <a href="docs/SAFETY.md">Safety</a> · <a href="docs/README.he.md">עברית</a></p>
+<p align="center"><a href="https://github.com/danielsimisi-coder/keepelix/releases">Releases</a> · <a href="docs/DISTRIBUTION.md">Build from source</a> · <a href="docs/PRIVACY.md">Privacy</a> · <a href="docs/SAFETY.md">Safety</a></p>
 
 ## Your Mac is full. But full of what?
 
@@ -44,6 +44,10 @@ Sizes are space allocated on disk. Hard links, APFS clones, snapshots and cloud 
 
 ![File review with a Quick Look preview, generated demo files](assets/keepelix-preview.png)
 
+The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
+
+![Storage map in Hebrew with right-to-left layout, generated demo files](assets/keepelix-hebrew.png)
+
 ## What it does
 
 | Review | Compare | Stay in control |
@@ -61,7 +65,7 @@ Sizes are space allocated on disk. Hard links, APFS clones, snapshots and cloud 
 
 1. Get the ZIP from [Releases](https://github.com/danielsimisi-coder/keepelix/releases), extract it, and open Keepelix.
 2. Click **Storage map** to see which folders fill a folder or drive, then **Review files here**. Or click **WhatsApp**, **Downloads**, **Movies**, **Pictures**, **Documents** or **Desktop**, or choose **Other folder or drive**. Each scans only the selected location. WhatsApp checks its local media folder on click and offers a folder picker if unavailable; no account connection is needed. Pictures skips Photos library packages.
-3. Select a row and press **Space**. Use **↓** or **Keep & next** to continue.
+3. Select a row and press **Space**. Use **↓** or **Keep & next** to continue. Clicking a location that is already loaded shows it again without rescanning; **Refresh** rescans.
 4. Use **⌘-click** or **Shift-click** to select several files. The count and size are shown before you confirm **Move to Trash**.
 
 **Signing status:** the initial private beta is ad-hoc signed, **not Apple-notarized**. Gatekeeper may block a downloaded build. Do not disable Gatekeeper; building from source is the alternative until a Developer ID-signed, notarized release is available. See [distribution instructions](docs/DISTRIBUTION.md).
@@ -132,9 +136,9 @@ docs/                    Privacy, safety, release and contributor guidance
 
 ## Status and contribution
 
-This is beta 3. Code compilation and automated tests are not substitutes for testing on every macOS version. The Intel slice is cross-built; real Intel-machine verification and clean-Mac Gatekeeper verification are release checklist items, not implied claims.
+This is beta 4. Code compilation and automated tests are not substitutes for testing on every macOS version. The Intel slice is cross-built; real Intel-machine verification and clean-Mac Gatekeeper verification are release checklist items, not implied claims.
 
-Primary controls support English and Hebrew. Some status and system error text remains English. Contributions to accessibility, localisation and synthetic-fixture coverage are welcome. See [CONTRIBUTING](CONTRIBUTING.md), [SECURITY](SECURITY.md), and [CHANGELOG](CHANGELOG.md).
+The interface is English by default. **Keepelix › Language › עברית** switches the whole app to Hebrew with right-to-left layout on the next launch (the choice is stored for this app only). Contributions to accessibility, localisation and synthetic-fixture coverage are welcome. See [CONTRIBUTING](CONTRIBUTING.md), [SECURITY](SECURITY.md), and [CHANGELOG](CHANGELOG.md).
 
 Released under the [MIT License](LICENSE). Built to help people decide what to keep.
 

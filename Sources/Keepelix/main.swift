@@ -2,7 +2,9 @@ import Cocoa
 import Quartz
 import KeepelixCore
 
-func L(_ en: String, _ he: String) -> String { (Locale.preferredLanguages.first ?? "en").hasPrefix("he") ? he : en }
+/// Interface language. English by default; Hebrew is an explicit choice in Keepelix › Language and applies on the next launch.
+enum AppLanguage { static var current = "en"; static let supported = [("en", "English"), ("he", "עברית")] }
+func L(_ en: String, _ he: String) -> String { AppLanguage.current == "he" ? he : en }
 func bytes(_ n: Int64) -> String { ByteCountFormatter.string(fromByteCount: n, countStyle: .file) }
 
 final class FileTable: NSTableView {
@@ -93,7 +95,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         window = NSWindow(contentRect:NSRect(x:0,y:0,width:1320,height:820),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
-        window.delegate=self; window.title="Keepelix · 0.1.0 beta 3"
+        window.delegate=self; window.title="Keepelix · 0.1.0 beta 4"
         window.minSize=NSSize(width:1120,height:720);window.center();window.titlebarAppearsTransparent=true
         func label(_ text:String,_ size:CGFloat,_ weight:NSFont.Weight = .regular,_ secondary:Bool = false)->NSTextField {
             let v=NSTextField(labelWithString:text);v.font = .systemFont(ofSize:size,weight:weight);v.textColor=secondary ? .secondaryLabelColor : .labelColor;return v
@@ -143,7 +145,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         search.placeholderString=L("Search files…","חפש קבצים…");search.delegate=self;search.controlSize = .large
         search.widthAnchor.constraint(greaterThanOrEqualToConstant:210).isActive=true
         sizeFilter.addItems(withTitles:[L("All sizes","כל הגדלים"),"> 10 MB","> 100 MB","> 1 GB"]);sizeFilter.selectItem(at:0)
-        kindFilter.addItem(withTitle:L("All types","כל הסוגים"));kindFilter.addItems(withTitles:FileKind.allCases.map(\.rawValue))
+        kindFilter.addItem(withTitle:L("All types","כל הסוגים"));kindFilter.addItems(withTitles:FileKind.allCases.map{kind in switch kind {case .image:return L("Images","תמונות");case .video:return L("Videos","סרטונים");case .audio:return L("Audio","שמע");case .document:return L("Documents","מסמכים");case .archive:return L("Archives","ארכיונים");case .other:return L("Other","אחר")}})
         for popup in [sizeFilter,kindFilter] {popup.target=self;popup.action = #selector(applyFilters);popup.font = .systemFont(ofSize:12)}
         sizeFilter.setAccessibilityLabel(L("Minimum size","גודל מינימלי"));kindFilter.setAccessibilityLabel(L("File type","סוג קובץ"));sortPicker.setAccessibilityLabel(L("Sort order","סדר מיון"))
         mode.setAccessibilityLabel(L("Review view","תצוגת סקירה"));groupPicker.setAccessibilityLabel(L("Duplicate group","קבוצת כפילויות"));agePicker.setAccessibilityLabel(L("Age filter","סינון לפי גיל"));table.setAccessibilityLabel(L("Files","קבצים"))
@@ -261,7 +263,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let main = NSMenu(); let app = NSMenuItem(); main.addItem(app); let menu = NSMenu(); app.submenu = menu
         let about = NSMenuItem(title: L("About Keepelix", "אודות Keepelix"), action: #selector(aboutApp), keyEquivalent: ""); about.target = self; menu.addItem(about)
         menu.addItem(withTitle: L("Quit Keepelix","סגור Keepelix"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
-        let edit = NSMenuItem(); edit.title = "Edit"; main.addItem(edit); edit.submenu = NSMenu(title:"Edit")
+        let edit = NSMenuItem(); edit.title = L("Edit","עריכה"); main.addItem(edit); edit.submenu = NSMenu(title:L("Edit","עריכה"))
         for (title,selector,key) in [(L("Select all","בחר הכול"),#selector(selectAllCommand),"a"),(L("Undo","שחזר"),#selector(undoCommand),"z")] {
             let item = NSMenuItem(title:title,action:selector,keyEquivalent:key); item.target=self; edit.submenu!.addItem(item)
         }
@@ -269,9 +271,37 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         menu.insertItem(.separator(),at:1)
         let confirmation=NSMenuItem(title:L("Confirm before Trash","אישור לפני העברה לפח"),action:#selector(toggleTrashConfirmation(_:)),keyEquivalent:"");confirmation.target=self;confirmation.state=preferences.bool(forKey:"skipTrashConfirmation") ? .off : .on;menu.insertItem(confirmation,at:2);confirmationMenuItem=confirmation
         // Standard text editing remains available in the search field.
-        edit.submenu!.addItem(withTitle:"Copy",action:#selector(NSText.copy(_:)),keyEquivalent:"c")
-        edit.submenu!.addItem(withTitle:"Paste",action:#selector(NSText.paste(_:)),keyEquivalent:"v")
+        edit.submenu!.addItem(withTitle:L("Copy","העתק"),action:#selector(NSText.copy(_:)),keyEquivalent:"c")
+        edit.submenu!.addItem(withTitle:L("Paste","הדבק"),action:#selector(NSText.paste(_:)),keyEquivalent:"v")
+        let language=NSMenuItem(title:L("Language","שפה"),action:nil,keyEquivalent:"");let languageMenu=NSMenu(title:L("Language","שפה"))
+        for (code,title) in AppLanguage.supported {
+            let item=NSMenuItem(title:title,action:#selector(chooseLanguage(_:)),keyEquivalent:"");item.target=self;item.representedObject=code
+            item.state = AppLanguage.current == code ? .on : .off;languageMenu.addItem(item)
+        }
+        language.submenu=languageMenu;menu.insertItem(language,at:3);languageMenuItem=language
         NSApp.mainMenu=main
+    }
+    var languageMenuItem:NSMenuItem?
+    /// Stores the choice for this app only (its own preferences domain) so system panels and layout direction follow on the next launch.
+    @objc func chooseLanguage(_ sender:NSMenuItem) {
+        guard let code=sender.representedObject as? String, AppLanguage.supported.contains(where:{$0.0 == code}) else { return }
+        preferences.set(code,forKey:"language");preferences.set([code],forKey:"AppleLanguages")
+        // AppKit mirrors the whole window (sidebar, tables, buttons) from this key at launch; Hebrew is right-to-left.
+        preferences.set(code == "he",forKey:"AppleTextDirection")
+        sender.menu?.items.forEach{$0.state = ($0.representedObject as? String) == code ? .on : .off}
+        guard code != AppLanguage.current, !smokeMode else { return }
+        let hebrew = code == "he"
+        let a=NSAlert();a.messageText = hebrew ? "Keepelix תוצג בעברית בפתיחה הבאה" : "Keepelix will open in English next time"
+        a.informativeText = hebrew ? "הפעל מחדש כדי להחיל את השפה וכיוון הממשק. פעולה שרצה כרגע צריכה להסתיים קודם." : "Relaunch to apply the language and layout direction. A running operation must finish first."
+        a.addButton(withTitle: hebrew ? "הפעל מחדש עכשיו" : "Relaunch now");a.addButton(withTitle: hebrew ? "אחר כך" : "Later")
+        if a.runModal() == .alertFirstButtonReturn { relaunch() }
+    }
+    func relaunch() {
+        guard !busy else { return }
+        let url=Bundle.main.bundleURL
+        guard url.pathExtension == "app" else { return } // running from a bare executable: quit and start again by hand
+        let configuration=NSWorkspace.OpenConfiguration();configuration.createsNewApplicationInstance=true
+        NSWorkspace.shared.openApplication(at:url,configuration:configuration){ _,_ in DispatchQueue.main.async{ NSApp.terminate(nil) } }
     }
     @objc func undoCommand() {
         if let editor=window.firstResponder as? NSTextView {editor.undoManager?.undo()} else {undoTrash()}
@@ -290,7 +320,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         }
         return true
     }
-    @objc func aboutApp() { show(L("Keepelix 0.1.0 beta 3", "Keepelix 0.1.0 בטא 3"), "© 2026 Daniel Siman Tov\n" + L("Contact: ","יצירת קשר: ") + "daniel.simisi@gmail.com\n\n" + L("Offline file review. MIT license. Not affiliated with WhatsApp or Meta. Undo is available for this app session; Finder Trash remains available afterward.","סקירת קבצים מקומית. רישיון MIT. ללא שיוך ל־WhatsApp או Meta. שחזור באפליקציה זמין במהלך ההפעלה הנוכחית; הפח של Finder נשאר זמין לאחר מכן.")) }
+    @objc func aboutApp() { show(L("Keepelix 0.1.0 beta 4", "Keepelix 0.1.0 בטא 4"), "© 2026 Daniel Siman Tov\n" + L("Contact: ","יצירת קשר: ") + "daniel.simisi@gmail.com\n\n" + L("Offline file review. MIT license. Not affiliated with WhatsApp or Meta. Undo is available for this app session; Finder Trash remains available afterward.","סקירת קבצים מקומית. רישיון MIT. ללא שיוך ל־WhatsApp או Meta. שחזור באפליקציה זמין במהלך ההפעלה הנוכחית; הפח של Finder נשאר זמין לאחר מכן.")) }
     func show(_ title: String, _ detail: String) {
         if smokeMode { print("Alert suppressed in smoke mode: \(title) — \(detail)"); return }
         let a=NSAlert();a.messageText=title;a.informativeText=detail;a.runModal()
@@ -309,11 +339,29 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         guard paths.indices.contains(index) else { return nil }
         return home.appendingPathComponent(paths[index],isDirectory:true)
     }
+    func locationURL(_ tag:Int) -> URL? {
+        guard let suggested=Self.presetURL(tag,home:FileManager.default.homeDirectoryForCurrentUser) else { return nil }
+        if tag == 0, let saved=preferences.string(forKey:"whatsAppMediaFolder") { return URL(fileURLWithPath:saved,isDirectory:true) }
+        return suggested
+    }
+    /// A location that is already loaded is shown again instead of scanned again; Refresh rescans explicitly.
+    func isCurrentRoot(_ url:URL) -> Bool {
+        guard let current=root, let resolved=try? FileSafety.root(url) else { return false }
+        return resolved.path == current.path
+    }
+    func updateLocationHighlight() {
+        let active = (mapMode ? mapRoot : root)?.path
+        for b in locationButtons {
+            let matches = active != nil && locationURL(b.tag).flatMap{ try? FileSafety.root($0) }?.path == active
+            b.wantsLayer=true;b.layer?.cornerRadius=7
+            b.layer?.backgroundColor = matches ? NSColor.controlAccentColor.withAlphaComponent(0.22).cgColor : nil
+            b.contentTintColor = matches ? .controlAccentColor : .labelColor
+            b.setAccessibilityValue(matches ? L("Current location","המיקום הנוכחי") : "")
+        }
+    }
     @objc func chooseLocation(_ sender:NSButton) {
-        guard !busy, let suggested=Self.presetURL(sender.tag,home:FileManager.default.homeDirectoryForCurrentUser) else { return }
-        let candidate:URL
-        if sender.tag == 0, let saved=preferences.string(forKey:"whatsAppMediaFolder") { candidate=URL(fileURLWithPath:saved,isDirectory:true) }
-        else { candidate=suggested }
+        guard !busy, let candidate=locationURL(sender.tag) else { return }
+        if isCurrentRoot(candidate) { if mapMode { setMapMode(false) };window.makeFirstResponder(table);return }
         var directory:ObjCBool=false
         if FileManager.default.fileExists(atPath:candidate.path,isDirectory:&directory),directory.boolValue {
             startScan(candidate);return
@@ -367,7 +415,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         guard !busy else{return}
         do { activateRoot(try FileSafety.root(url)) } catch { show(L("Cannot scan this folder","לא ניתן לסרוק את התיקייה"),error.localizedDescription);return }
         if mapMode { setMapMode(false) }
-        let selectedRoot=root!;preferences.set(selectedRoot.path,forKey:"lastFolder");folderLabel.stringValue=selectedRoot.path
+        let selectedRoot=root!;preferences.set(selectedRoot.path,forKey:"lastFolder");folderLabel.stringValue=selectedRoot.path;updateLocationHighlight()
         primary.previewItem=nil;comparison.previewItem=nil;files=[];exact=[];similar=[];guards=[:];mode.selectItem(at:0);modeChanged()
         token=CancellationToken();let jobToken=token;setBusy(true);status.stringValue=L("Scanning file metadata…","סורק שמות וגדלים…")
         work.async {
@@ -397,7 +445,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             if !demoMode { folderLabel.stringValue = root?.path ?? L("Choose a location from the sidebar to begin","בחר מיקום מהסרגל הצדדי כדי להתחיל") }
             ageHint.isHidden = mode.indexOfSelectedItem != 3;comparison.isHidden = !(mode.indexOfSelectedItem == 1 || mode.indexOfSelectedItem == 2);updateSelection()
         }
-        refreshEmptyState();updateEnabled()
+        refreshEmptyState();updateEnabled();updateLocationHighlight()
     }
     func refreshEmptyState() {
         if mapMode {
@@ -431,7 +479,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             let detail = url.standardizedFileURL.path == "/" ? L("The whole startup disk cannot be mapped. Choose your home folder, a folder inside it, or an external drive.","אי אפשר למפות את כל דיסק ההפעלה. בחר את תיקיית הבית, תיקייה בתוכה או כונן חיצוני.") : error.localizedDescription
             show(L("Cannot map this folder","לא ניתן למפות את התיקייה"),detail);return
         }
-        mapRoot=target;mapPanel.load(nil);setMapMode(true);folderLabel.stringValue=target.path
+        mapRoot=target;mapPanel.load(nil);setMapMode(true);folderLabel.stringValue=target.path;updateLocationHighlight()
         token=CancellationToken();let jobToken=token;setBusy(true);refreshEmptyState()
         status.stringValue=L("Measuring folders…","מודד תיקיות…")
         work.async {
@@ -734,8 +782,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             }
             trashBackend=FixtureTrash(folder:temp.appendingPathComponent(".fixture-trash"))
             preferences.set(true,forKey:"skipTrashConfirmation")
-            table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false)
-            let target=selectedFiles[0].url
+            sortPicker.selectItem(at:ReviewSort.name.rawValue);changeSort()
+            let target=temp.appendingPathComponent("coast-notes.txt").resolvingSymlinksInPath()
+            table.selectRowIndexes(IndexSet(integer:shown.firstIndex{$0.url.path == target.path}!),byExtendingSelection:false)
+            precondition(selectedFiles[0].url.path == target.path)
             func key(_ code:UInt16,_ flags:NSEvent.ModifierFlags=[],_ repeated:Bool=false) {
                 let event=NSEvent.keyEvent(with:.keyDown,location:.zero,modifierFlags:flags,timestamp:0,windowNumber:window.windowNumber,context:nil,characters:"",charactersIgnoringModifiers:"",isARepeat:repeated,keyCode:code)!
                 table.keyDown(with:event);settle()
@@ -757,9 +807,18 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             try FileManager.default.removeItem(at:target)
             retryRestore();settle()
             let restoredText=try String(contentsOf:target)
-            precondition(history.blockedCount == 0 && retryButton.isHidden && restoredText == "Synthetic duplicate fixture" && history.canRedo && waitingRestores == 0)
+            precondition(history.blockedCount == 0 && waitingRestores == 0,"Retry must clear the waiting list: \(history.blockedCount)")
+            precondition(retryButton.isHidden,"Retry button must hide once nothing waits")
+            precondition(restoredText == "Synthetic duplicate fixture","Restored content mismatch: \(restoredText)")
+            precondition(history.canRedo,"A retried restore must be redoable")
             let savedRoot=root!;activateRoot(temp.appendingPathComponent("other"));precondition(!history.canUndo && !history.canRedo);activateRoot(savedRoot);precondition(history.canRedo)
             toggleTrashConfirmation(confirmationMenuItem!);precondition(!preferences.bool(forKey:"skipTrashConfirmation"))
+            let languageItems=languageMenuItem!.submenu!.items;precondition(languageItems.map{$0.representedObject as? String} == ["en","he"] && languageItems[0].state == .on)
+            chooseLanguage(languageItems[1]);precondition(preferences.string(forKey:"language") == "he" && preferences.stringArray(forKey:"AppleLanguages") == ["he"] && languageItems[1].state == .on && languageItems[0].state == .off)
+            precondition(AppLanguage.current == "en" && L("a","ב") == "a","A language choice applies on the next launch, not mid-session")
+            precondition(preferences.bool(forKey:"AppleTextDirection"),"Hebrew must switch the layout direction")
+            chooseLanguage(languageItems[0]);precondition(preferences.stringArray(forKey:"AppleLanguages") == ["en"] && !preferences.bool(forKey:"AppleTextDirection"))
+            precondition(isCurrentRoot(root!) && !isCurrentRoot(temp.appendingPathComponent("map")),"Clicking the loaded location again must not rescan")
             print("UI smoke: storage map, selection, old-file sorting, preview, confirmation preference, Delete, Undo, Redo, blocked-restore retry and held-key protection passed. No real files changed; no windows shown.")
             cleanup();fflush(stdout);exit(0)
         } catch { fputs("UI smoke failed: \(error)\n",stderr);cleanup();exit(1) }
@@ -782,6 +841,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         return total
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{true}
+}
+let launchArguments=ProcessInfo.processInfo.arguments
+if let index=launchArguments.firstIndex(of:"--language"), index+1<launchArguments.count, AppLanguage.supported.contains(where:{$0.0 == launchArguments[index+1]}) {
+    AppLanguage.current=launchArguments[index+1]
+} else if !launchArguments.contains("--smoke-test") && !launchArguments.contains("--demo") && !launchArguments.contains("--demo-map") {
+    AppLanguage.current = UserDefaults.standard.string(forKey:"language") == "he" ? "he" : "en"
 }
 let app=NSApplication.shared;app.setActivationPolicy((ProcessInfo.processInfo.arguments.contains("--smoke-test") || ProcessInfo.processInfo.arguments.contains("--launch-check")) ? .prohibited : .regular)
 let controller=AppController();app.delegate=controller;app.run()

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-beta.4
+
+- English is the default interface language on every Mac. Keepelix › Language offers Hebrew, which applies on the next launch with full right-to-left layout; the choice is stored for this app only.
+- The sidebar highlights the location currently loaded, and clicking it again shows it without rescanning (Refresh rescans).
+- The package declares English and Hebrew localizations so system panels follow the chosen language.
+- The repository documentation is English only.
+
 ## 0.1.0-beta.3
 
 - Add a storage map: measure any folder or drive, list folders largest first with share bars, open folders, and hand a folder to file review with one click. Read-only; Delete does nothing in the map.

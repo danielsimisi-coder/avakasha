@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-version="${VERSION:-0.1.0-beta.3}"
+version="${VERSION:-0.1.0-beta.4}"
 build_root="${BUILD_ROOT:-.build/distribution}"
 dist_dir="${DIST_DIR:-dist}"
 mkdir -p "$build_root" "$dist_dir"
@@ -13,6 +13,8 @@ trap 'rm -rf "$stage"' EXIT
 app="$stage/Keepelix.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
 cp LICENSE "$app/Contents/Resources/LICENSE.txt"
+# Declared localizations let AppKit honour the in-app language choice (English default, Hebrew with right-to-left layout).
+for lang in en he; do mkdir -p "$app/Contents/Resources/$lang.lproj"; printf '/* Keepelix %s */\n' "$lang" > "$app/Contents/Resources/$lang.lproj/InfoPlist.strings"; done
 arm_bin="$(swift build -c release --arch arm64 --scratch-path "$build_root/arm64" --show-bin-path)/Keepelix"
 intel_bin="$(swift build -c release --arch x86_64 --scratch-path "$build_root/x86_64" --show-bin-path)/Keepelix"
 lipo -create "$arm_bin" "$intel_bin" -output "$app/Contents/MacOS/Keepelix"
@@ -22,9 +24,11 @@ strip -S "$app/Contents/MacOS/Keepelix"
 /usr/libexec/PlistBuddy -c 'Add :CFBundleIdentifier string io.github.danielsimisi-coder.Keepelix' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :NSHumanReadableCopyright string © 2026 Daniel Siman Tov — daniel.simisi@gmail.com' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :CFBundleName string Keepelix' "$app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleDevelopmentRegion string en' "$app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleLocalizations array' -c 'Add :CFBundleLocalizations:0 string en' -c 'Add :CFBundleLocalizations:1 string he' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :CFBundlePackageType string APPL' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string ${version%%-*}" "$app/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c 'Add :CFBundleVersion string 3' "$app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleVersion string 4' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :LSMinimumSystemVersion string 13.0' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :NSHighResolutionCapable bool true' "$app/Contents/Info.plist"
 if [ -f assets/AppIcon.icns ]; then
