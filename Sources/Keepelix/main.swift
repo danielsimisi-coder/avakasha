@@ -64,6 +64,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     let selectionLabel = NSTextField(labelWithString: "")
     let pathLabel = PathLink()
     let kindBadge = NSTextField(labelWithString: "")
+    let chatBadge = NSButton()
     var videoPlayer: AVPlayerView!
     var videoHost: NSStackView!
     let playButton = NSButton()
@@ -117,7 +118,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         window = NSWindow(contentRect:NSRect(x:0,y:0,width:1320,height:820),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
-        window.delegate=self; window.title="Keepelix · 0.1.0 beta 7"
+        window.delegate=self; window.title="Keepelix · 0.1.0 beta 8"
         window.minSize=NSSize(width:1120,height:720);window.center();window.titlebarAppearsTransparent=true
         func label(_ text:String,_ size:CGFloat,_ weight:NSFont.Weight = .regular,_ secondary:Bool = false)->NSTextField {
             let v=NSTextField(labelWithString:text);v.font = .systemFont(ofSize:size,weight:weight);v.textColor=secondary ? .secondaryLabelColor : .labelColor;return v
@@ -242,7 +243,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         kindBadge.setContentHuggingPriority(.required,for:.horizontal);kindBadge.setContentCompressionResistancePriority(.required,for:.horizontal)
         kindBadge.widthAnchor.constraint(greaterThanOrEqualToConstant:52).isActive=true;kindBadge.heightAnchor.constraint(equalToConstant:18).isActive=true;kindBadge.isHidden=true
         kindBadge.setAccessibilityLabel(L("File type","סוג הקובץ"))
-        let selection=row([all,extrasButton,kindBadge,pathLabel,selectionLabel],10)
+        chatBadge.isBordered=false;chatBadge.wantsLayer=true;chatBadge.layer?.cornerRadius=5;chatBadge.font = .systemFont(ofSize:10,weight:.semibold);chatBadge.imagePosition = .imageLeading;chatBadge.imageHugsTitle=true
+        chatBadge.target=self;chatBadge.action = #selector(filterByFocusedChat);chatBadge.isHidden=true;chatBadge.heightAnchor.constraint(equalToConstant:18).isActive=true
+        chatBadge.setContentHuggingPriority(.required,for:.horizontal);chatBadge.setContentCompressionResistancePriority(.defaultHigh,for:.horizontal);chatBadge.lineBreakMode = .byTruncatingTail
+        chatBadge.toolTip=L("The WhatsApp chat this file belongs to. Click to show only this chat.","השיחה בווטסאפ שהקובץ שייך אליה. לחיצה מציגה רק את השיחה הזו.")
+        let selection=row([all,extrasButton,kindBadge,chatBadge,pathLabel,selectionLabel],10)
         let preview=button("Preview","תצוגה מקדימה","eye",#selector(togglePreview));preview.toolTip=L("Space to toggle preview","רווח לפתיחה וסגירה של תצוגה מקדימה")
         let next=button("Keep & next","השאר והמשך","arrow.right",#selector(nextFile))
         let trash=button("Move to Trash…","העבר לפח…","trash",#selector(trashSelection));trash.contentTintColor = .systemRed
@@ -403,7 +408,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         }
         return true
     }
-    @objc func aboutApp() { show(L("Keepelix 0.1.0 beta 7", "Keepelix 0.1.0 בטא 7"), "© 2026 Daniel Siman Tov\n" + L("Contact: ","יצירת קשר: ") + "daniel.simisi@gmail.com\n\n" + L("Offline file review. MIT license. Not affiliated with WhatsApp or Meta. Undo is available for this app session; Finder Trash remains available afterward.","סקירת קבצים מקומית. רישיון MIT. ללא שיוך ל־WhatsApp או Meta. שחזור באפליקציה זמין במהלך ההפעלה הנוכחית; הפח של Finder נשאר זמין לאחר מכן.")) }
+    @objc func aboutApp() { show(L("Keepelix 0.1.0 beta 8", "Keepelix 0.1.0 בטא 8"), "© 2026 Daniel Siman Tov\n" + L("Contact: ","יצירת קשר: ") + "daniel.simisi@gmail.com\n\n" + L("Offline file review. MIT license. Not affiliated with WhatsApp or Meta. Undo is available for this app session; Finder Trash remains available afterward.","סקירת קבצים מקומית. רישיון MIT. ללא שיוך ל־WhatsApp או Meta. שחזור באפליקציה זמין במהלך ההפעלה הנוכחית; הפח של Finder נשאר זמין לאחר מכן.")) }
     func show(_ title: String, _ detail: String) {
         if smokeMode { print("Alert suppressed in smoke mode: \(title) — \(detail)"); return }
         let a=NSAlert();a.messageText=title;a.informativeText=detail;a.runModal()
@@ -759,7 +764,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         else { selectionLabel.stringValue=L("Item ","פריט ")+"\((table.selectedRowIndexes.contains(focusRow) ? focusRow : table.selectedRowIndexes.first!)+1)"+L(" of ","  מתוך ")+"\(shown.count) · \(chosen.count) "+L("selected","נבחרו")+" · "+bytes(chosen.reduce(0){$0+$1.allocatedBytes}) }
         let focused=focusedFile
         pathLabel.stringValue = focused.map{ displayPath($0.url) } ?? "";pathLabel.toolTip = focused?.url.path
-        updateKindBadge(focused)
+        updateKindBadge(focused);updateChatBadge(focused)
         refreshEmptyState()
         if let f=chosen.first{preferences.set(f.id,forKey:"lastFile")};updatePreview();updateEnabled()
     }
@@ -794,6 +799,22 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     func revealFocusedFile() {
         guard !busy, let f=focusedFile, let root=root else { return }
         do { try FileSafety.validate(f,root:root);NSWorkspace.shared.activateFileViewerSelecting([f.url]) } catch { show(L("File unavailable","הקובץ אינו זמין"),error.localizedDescription) }
+    }
+    /// Names the WhatsApp chat of the highlighted file: display name once the chat list was loaded, otherwise the folder identifier.
+    func updateChatBadge(_ file:FileRecord?) {
+        guard let f=file, let id=ChatDirectory.identifier(of:f.url) else { chatBadge.isHidden=true;return }
+        let kind=chatNames[id]?.kind ?? ChatFolders.kind(of:f.url) ?? .personal
+        let symbol = kind == .group ? "person.3.fill" : (kind == .broadcast ? "megaphone.fill" : "person.fill")
+        let color:NSColor = kind == .group ? .systemGreen : .systemBlue
+        chatBadge.title="  "+(chatNames[id]?.name ?? id)+"  ";chatBadge.image=NSImage(systemSymbolName:symbol,accessibilityDescription:nil);chatBadge.contentTintColor=color
+        chatBadge.layer?.backgroundColor=color.withAlphaComponent(0.16).cgColor;chatBadge.isHidden=false
+        chatBadge.setAccessibilityLabel((kind == .group ? L("Group","קבוצה") : L("Chat","שיחה"))+": "+(chatNames[id]?.name ?? id))
+    }
+    @objc func filterByFocusedChat() {
+        guard !busy, let f=focusedFile, let id=ChatDirectory.identifier(of:f.url) else { return }
+        if chatFilter.numberOfItems <= 4 { rebuildChatFilter() }
+        guard let index=chatFilter.itemArray.firstIndex(where:{ ($0.representedObject as? String) == id }) else { return }
+        chatFilter.selectItem(at:index);applyFilters();window.makeFirstResponder(table)
     }
     /// Home folder shown as ~ so long paths stay readable; the tooltip keeps the full path.
     func displayPath(_ url:URL) -> String { (url.path as NSString).abbreviatingWithTildeInPath }
@@ -1021,6 +1042,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             applyFilters();precondition(!chatNamesButton.isHidden,"Offer names once a chat list is found");loadChatNames(confirmed:true);settle()
             precondition(chatNames["12036301@g.us"]?.name == "Synthetic hiking group" && chatNamesButton.isHidden && status.stringValue.hasPrefix("1 / 1"),status.stringValue)
             let named=chatFilter.itemArray.firstIndex{ $0.title.hasPrefix("Synthetic hiking group") }!;chatFilter.selectItem(at:named);applyFilters();precondition(shown.count == 1 && shown[0].url.lastPathComponent == "clip.txt","Filtering by a named chat")
+            table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false);precondition(!chatBadge.isHidden && chatBadge.title.contains("Synthetic hiking group"),"The chat badge names the highlighted file's chat")
+            chatFilter.selectItem(at:0);applyFilters();table.selectRowIndexes(IndexSet(integer:shown.firstIndex{$0.url == chatFile}!),byExtendingSelection:false);filterByFocusedChat();precondition(shown.count == 1 && (chatFilter.selectedItem?.representedObject as? String) == "12036301@g.us","Clicking the badge filters to that chat")
+            chatFilter.selectItem(at:0);applyFilters();table.selectRowIndexes(IndexSet(integer:shown.firstIndex{$0.url != chatFile}!),byExtendingSelection:false);precondition(chatBadge.isHidden,"No badge outside chat folders")
             try FileManager.default.removeItem(at:temp.appendingPathComponent(ChatDirectory.databaseName))
             chatFilter.selectItem(at:0);files.removeAll{$0.url == chatFile};try FileManager.default.removeItem(at:temp.appendingPathComponent("Media"));applyFilters();precondition(chatFilter.isHidden)
             table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false)
