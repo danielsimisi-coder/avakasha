@@ -7,6 +7,7 @@
 - Videos in mp4, m4v or mov play inline with an always-visible transport bar (play/pause, scrubber, time, mute); other formats keep Quick Look. Nothing autoplays.
 - The counter reads "Item N of M · selected · size" so you always know where you are in the list.
 - Empty state says "Scanning…" while a scan runs. Read-only demo includes a generated three-second clip.
+- Extending the selection with Shift+↓, Shift+↑ or ⌘-click previews the row you just reached; the path, badge and counter follow it.
 
 ## 0.1.0-beta.4
 

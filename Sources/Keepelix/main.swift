@@ -611,6 +611,21 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     func controlTextDidChange(_ obj: Notification){applyFilters()}
     var selectedFiles:[FileRecord]{table.selectedRowIndexes.compactMap{$0<shown.count ? shown[$0]:nil}}
+    /// The row most recently added to the selection (Shift+↓, Shift+↑, ⌘-click), so the preview follows what you just reached.
+    var focusRow = -1
+    var previousSelection = IndexSet()
+    var focusedFile:FileRecord? {
+        let rows=table.selectedRowIndexes
+        if rows.contains(focusRow), focusRow<shown.count { return shown[focusRow] }
+        return selectedFiles.first
+    }
+    func trackFocus() {
+        let rows=table.selectedRowIndexes;let added=rows.subtracting(previousSelection);let removed=previousSelection.subtracting(rows)
+        if let last=added.last, let first=added.first { focusRow = last > (previousSelection.last ?? -1) ? last : first }
+        else if !removed.isEmpty, let hi=rows.last, let lo=rows.first { focusRow = (removed.first ?? 0) > hi ? hi : lo }
+        else if !rows.contains(focusRow) { focusRow = rows.first ?? -1 }
+        previousSelection=rows
+    }
     func numberOfRows(in tableView:NSTableView)->Int{shown.count}
     func tableView(_ tableView:NSTableView,viewFor tableColumn:NSTableColumn?,row:Int)->NSView?{
         let f=shown[row];let text:String
@@ -625,13 +640,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         icon.widthAnchor.constraint(equalToConstant:18).isActive=true;icon.heightAnchor.constraint(equalToConstant:18).isActive=true
         let cell=NSStackView(views:[icon,v]);cell.spacing=9;cell.toolTip=f.url.path;return cell
     }
-    func tableViewSelectionDidChange(_ notification:Notification){updateSelection()}
+    func tableViewSelectionDidChange(_ notification:Notification){trackFocus();updateSelection()}
     func updateSelection(){
         let chosen=selectedFiles
         if chosen.isEmpty { selectionLabel.stringValue="\(shown.count) " + L("items","פריטים") }
-        else { selectionLabel.stringValue=L("Item ","פריט ")+"\(table.selectedRowIndexes.first!+1)"+L(" of ","  מתוך ")+"\(shown.count) · \(chosen.count) "+L("selected","נבחרו")+" · "+bytes(chosen.reduce(0){$0+$1.allocatedBytes}) }
-        pathLabel.stringValue = chosen.first.map{ displayPath($0.url) } ?? "";pathLabel.toolTip = chosen.first?.url.path
-        updateKindBadge(chosen.first)
+        else { selectionLabel.stringValue=L("Item ","פריט ")+"\((table.selectedRowIndexes.contains(focusRow) ? focusRow : table.selectedRowIndexes.first!)+1)"+L(" of ","  מתוך ")+"\(shown.count) · \(chosen.count) "+L("selected","נבחרו")+" · "+bytes(chosen.reduce(0){$0+$1.allocatedBytes}) }
+        let focused=focusedFile
+        pathLabel.stringValue = focused.map{ displayPath($0.url) } ?? "";pathLabel.toolTip = focused?.url.path
+        updateKindBadge(focused)
         refreshEmptyState()
         if let f=chosen.first{preferences.set(f.id,forKey:"lastFile")};updatePreview();updateEnabled()
     }
@@ -716,7 +732,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     func updatePreview(){
         primary?.previewItem=nil;comparison?.previewItem=nil;stopVideo()
         previewPlaceholder?.isHidden = false;primary?.isHidden = true
-        guard !busy,!mapMode,previewOpen,let f=selectedFiles.first,let root=root,(try? FileSafety.validate(f,root:root)) != nil else{return}
+        guard !busy,!mapMode,previewOpen,let f=focusedFile,let root=root,(try? FileSafety.validate(f,root:root)) != nil else{return}
         previewPlaceholder?.isHidden = true
         if f.kind == .video, Self.playsInline(f.url) {
             startVideo(f.url) // paused until you press play
@@ -886,6 +902,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             deselect();precondition(pathLabel.stringValue.isEmpty);table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false)
             nextFile();precondition(table.selectedRow == 1 && primary.previewItem != nil)
             togglePreview();precondition(primary.previewItem == nil)
+            // Extending the selection previews the row just reached, shrinking it steps back.
+            togglePreview();table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false)
+            let shiftDown=NSEvent.keyEvent(with:.keyDown,location:.zero,modifierFlags:[.shift],timestamp:0,windowNumber:window.windowNumber,context:nil,characters:"\u{F701}",charactersIgnoringModifiers:"\u{F701}",isARepeat:false,keyCode:125)!
+            table.keyDown(with:shiftDown);precondition(table.selectedRowIndexes == IndexSet([0,1]) && primary.previewItem as? URL == shown[1].url && selectionLabel.stringValue.hasPrefix(L("Item ","פריט ")+"2"),"Shift+Down must preview the newly added row: \(selectionLabel.stringValue)")
+            table.keyDown(with:shiftDown);precondition(table.selectedRowIndexes == IndexSet([0,1,2]) && primary.previewItem as? URL == shown[2].url)
+            let shiftUp=NSEvent.keyEvent(with:.keyDown,location:.zero,modifierFlags:[.shift],timestamp:0,windowNumber:window.windowNumber,context:nil,characters:"\u{F700}",charactersIgnoringModifiers:"\u{F700}",isARepeat:false,keyCode:126)!
+            table.keyDown(with:shiftUp);precondition(table.selectedRowIndexes == IndexSet([0,1]) && primary.previewItem as? URL == shown[1].url,"Shift+Up back previews the last remaining row")
+            table.selectRowIndexes(IndexSet(integer:2),byExtendingSelection:false);table.keyDown(with:shiftUp);precondition(table.selectedRowIndexes == IndexSet([1,2]) && primary.previewItem as? URL == shown[1].url,"Shift+Up from a single row previews the row above")
+            togglePreview()
             let oldURL=temp.appendingPathComponent("old-sample.txt")
             try Data("Synthetic old file".utf8).write(to:oldURL)
             try FileManager.default.setAttributes([.modificationDate:Date(timeIntervalSince1970:946684800)],ofItemAtPath:oldURL.path)
