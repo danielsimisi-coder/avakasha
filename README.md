@@ -83,6 +83,7 @@ The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
 |---|---|
 | `Space` | Play or pause a video; otherwise toggle the preview (open by default) |
 | `Esc` | Stop a running scan, map or comparison and keep partial results |
+| `⌘C` | Copy the highlighted file's path (and the file, for pasting into Finder or a chat); right-click the path for the same |
 | `↑` / `↓` | Move through the list |
 | `⌘` + click | Add or remove a file from the selection |
 | `Shift` + click | Select a range |

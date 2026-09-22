@@ -3,6 +3,7 @@ import Cocoa
 /// A path shown as a quiet link: underline and hand cursor on hover, click reveals it in Finder.
 final class PathLink: NSTextField {
     var onOpen: (() -> Void)?
+    var onCopy: (() -> Void)?
     private(set) var hovered = false
     private var tracking: NSTrackingArea?
 
@@ -20,6 +21,15 @@ final class PathLink: NSTextField {
     override func mouseEntered(with event: NSEvent) { setHovered(true) }
     override func mouseExited(with event: NSEvent) { setHovered(false) }
     override func resetCursorRects() { if !stringValue.isEmpty { addCursorRect(bounds, cursor: .pointingHand) } }
+    override func menu(for event: NSEvent) -> NSMenu? {
+        guard !stringValue.isEmpty else { return nil }
+        let menu = NSMenu()
+        let copy = NSMenuItem(title: L("Copy path", "העתק נתיב"), action: #selector(copyPath), keyEquivalent: ""); copy.target = self; menu.addItem(copy)
+        let open = NSMenuItem(title: L("Show in Finder", "הצג ב־Finder"), action: #selector(openPath), keyEquivalent: ""); open.target = self; menu.addItem(open)
+        return menu
+    }
+    @objc private func copyPath() { onCopy?() }
+    @objc private func openPath() { onOpen?() }
     override func mouseUp(with event: NSEvent) {
         if bounds.contains(convert(event.locationInWindow, from: nil)), !stringValue.isEmpty { onOpen?() } else { super.mouseUp(with: event) }
     }

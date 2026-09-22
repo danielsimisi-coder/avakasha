@@ -238,7 +238,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         selectionLabel.font = .systemFont(ofSize:12,weight:.medium);selectionLabel.textColor = .secondaryLabelColor
         pathLabel.setContentCompressionResistancePriority(.defaultLow,for:.horizontal);pathLabel.setContentHuggingPriority(.init(1),for:.horizontal)
         pathLabel.setAccessibilityLabel(L("Selected file path · click to show in Finder","נתיב הקובץ הנבחר · לחיצה מציגה ב־Finder"))
-        pathLabel.onOpen={[weak self] in self?.revealFocusedFile()}
+        pathLabel.onOpen={[weak self] in self?.revealFocusedFile()};pathLabel.onCopy={[weak self] in self?.copyFocusedPath()}
+        pathLabel.toolTip=L("Click to show in Finder · right-click or ⌘C to copy the path","לחיצה מציגה ב־Finder · לחיצה ימנית או ⌘C מעתיקים את הנתיב")
         kindBadge.font = .systemFont(ofSize:10,weight:.semibold);kindBadge.wantsLayer=true;kindBadge.layer?.cornerRadius=5;kindBadge.alignment = .center
         kindBadge.setContentHuggingPriority(.required,for:.horizontal);kindBadge.setContentCompressionResistancePriority(.required,for:.horizontal)
         kindBadge.widthAnchor.constraint(greaterThanOrEqualToConstant:52).isActive=true;kindBadge.heightAnchor.constraint(equalToConstant:18).isActive=true;kindBadge.isHidden=true
@@ -359,7 +360,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         menu.insertItem(.separator(),at:1)
         let confirmation=NSMenuItem(title:L("Confirm before Trash","אישור לפני העברה לפח"),action:#selector(toggleTrashConfirmation(_:)),keyEquivalent:"");confirmation.target=self;confirmation.state=preferences.bool(forKey:"skipTrashConfirmation") ? .off : .on;menu.insertItem(confirmation,at:2);confirmationMenuItem=confirmation
         // Standard text editing remains available in the search field.
-        edit.submenu!.addItem(withTitle:L("Copy","העתק"),action:#selector(NSText.copy(_:)),keyEquivalent:"c")
+        let copyItem=NSMenuItem(title:L("Copy","העתק"),action:#selector(copyCommand),keyEquivalent:"c");copyItem.target=self;edit.submenu!.addItem(copyItem)
         edit.submenu!.addItem(withTitle:L("Paste","הדבק"),action:#selector(NSText.paste(_:)),keyEquivalent:"v")
         let language=NSMenuItem(title:L("Language","שפה"),action:nil,keyEquivalent:"");let languageMenu=NSMenu(title:L("Language","שפה"))
         for (code,title) in AppLanguage.supported {
@@ -795,6 +796,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             }
         }
     }
+    /// Puts the full path on the pasteboard as text, plus the file itself for pasting into Finder or a chat.
+    @discardableResult func copyFocusedPath() -> Bool {
+        guard let f=focusedFile else { return false }
+        let board=NSPasteboard.general;board.clearContents();board.writeObjects([f.url as NSURL]);board.setString(f.url.path,forType:.string)
+        status.stringValue=L("Path copied","הנתיב הועתק")+" · "+displayPath(f.url);return true
+    }
+    @objc func copyCommand() {
+        if let text=window.firstResponder as? NSText { text.copy(nil) } else if !copyFocusedPath() { NSSound.beep() }
+    }
     /// Opens the enclosing folder in Finder with the file selected, after the usual identity check.
     func revealFocusedFile() {
         guard !busy, let f=focusedFile, let root=root else { return }
@@ -1031,6 +1041,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(pathLabel.stringValue == displayPath(selectedFiles[0].url) && pathLabel.toolTip == selectedFiles[0].url.path,"The selected file's path must be shown")
             precondition((tableView(table,pasteboardWriterForRow:0) as? NSURL)?.path == shown[0].url.path,"Rows drag out as file URLs")
             pathLabel.setHovered(true);precondition(pathLabel.isUnderlined && pathLabel.onOpen != nil,"The path underlines on hover and opens Finder on click");pathLabel.setHovered(false);precondition(!pathLabel.isUnderlined)
+            let savedBoard=NSPasteboard.general.string(forType:.string);copyCommand()
+            precondition(NSPasteboard.general.string(forType:.string) == selectedFiles[0].url.path && (NSPasteboard.general.readObjects(forClasses:[NSURL.self],options:nil)?.first as? URL)?.path == selectedFiles[0].url.path,"⌘C copies the path and the file")
+            NSPasteboard.general.clearContents();if let s=savedBoard { NSPasteboard.general.setString(s,forType:.string) }
             precondition(tableView(table,pasteboardWriterForRow:99) == nil && chatFilter.isHidden)
             let chatFile=temp.appendingPathComponent("Media/12036301@g.us/clip.txt");try FileManager.default.createDirectory(at:chatFile.deletingLastPathComponent(),withIntermediateDirectories:true);try Data("g".utf8).write(to:chatFile)
             files.append(try FileRecord(url:chatFile));applyFilters();precondition(!chatFilter.isHidden,"Chat filter appears only when chat folders exist")
