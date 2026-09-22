@@ -163,7 +163,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         func column(_ views:[NSView],_ spacing:CGFloat = 10)->NSStackView {let s=NSStackView(views:views);s.orientation = .vertical;s.alignment = .leading;s.spacing=spacing;return s}
         func spacer()->NSView {let v=NSView();v.setContentHuggingPriority(.init(1),for:.horizontal);v.heightAnchor.constraint(equalToConstant:1).isActive=true;return v}
         func divider()->NSBox {let v=NSBox();v.boxType = .separator;return v}
-        let brandIcon=NSImageView(image:NSImage(systemSymbolName:"square.stack.3d.up.fill",accessibilityDescription:nil)!);brandIcon.contentTintColor = .controlAccentColor
+        let brandIcon=NSImageView(image:NSApp.applicationIconImage ?? NSImage(named:NSImage.applicationIconName) ?? NSImage());brandIcon.imageScaling = .scaleProportionallyUpOrDown;brandIcon.setAccessibilityLabel("Avakasha")
         brandIcon.widthAnchor.constraint(equalToConstant:26).isActive=true;brandIcon.heightAnchor.constraint(equalToConstant:26).isActive=true
         let brand=row([brandIcon,label("Avakasha",21,.semibold)],10)
         let choose=button("Other folder or drive…","תיקייה אחרת או כונן…","folder.badge.plus",#selector(chooseFolder))
@@ -377,6 +377,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             if ProcessInfo.processInfo.arguments.contains("--demo-older") { showOlderFiles() }
             mapPanel.showsPaths=false;pathLabel.isHidden=true
             if overviewMode && !ProcessInfo.processInfo.arguments.contains("--demo-overview") { setOverview(false) } // the demo shows files unless asked for the overview
+            home=container;freeUpPanel.home=container // Free up space in the demo measures the synthetic collection only
+            locationButtons.forEach{ $0.isEnabled=false;$0.toolTip=L("Disabled in the read-only demo","מושבת בהדגמה לקריאה בלבד") }
             window.minSize=NSSize(width:1190,height:768);window.setContentSize(NSSize(width:1190,height:768));window.center() // pin the demo window size
             if ProcessInfo.processInfo.arguments.contains("--demo-map") {
                 mapPanel.load(try StorageMapper.map(root:folder,token:CancellationToken()));mapRoot=folder;setMapMode(true)
@@ -487,7 +489,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         if !NSWorkspace.shared.open(url) { show(L("Cannot open Trash","לא ניתן לפתוח את הפח"),L("Open Trash from the Dock.","אפשר לפתוח את פח האשפה מה־Dock.")) }
     }
     @objc func chooseFolder() {
-        guard !busy else { return }; let p=NSOpenPanel();p.canChooseDirectories=true;p.canChooseFiles=false;p.allowsMultipleSelection=false
+        guard !busy else { return }
+        if demoMode, let folder=root { startScan(folder);return }; let p=NSOpenPanel();p.canChooseDirectories=true;p.canChooseFiles=false;p.allowsMultipleSelection=false
         p.message=L("Choose only the folder you want to review. No files are uploaded.","בחר רק את התיקייה שתרצה לבדוק. שום קובץ לא מועלה לרשת.")
         if p.runModal() == .OK, let u=p.url { startScan(u) }
     }
@@ -656,7 +659,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         }
     }
     @objc func chooseLocation(_ sender:NSButton) {
-        guard !busy, let candidate=locationURL(sender.tag) else { return }
+        guard !busy, !demoMode, let candidate=locationURL(sender.tag) else { return }
         if isCurrentRoot(candidate) { if mapMode { setMapMode(false) };window.makeFirstResponder(table);return }
         var directory:ObjCBool=false
         if FileManager.default.fileExists(atPath:candidate.path,isDirectory:&directory),directory.boolValue {
@@ -805,6 +808,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     @objc func chooseMapFolder() {
         guard !busy else { return }
+        if demoMode { if let folder=root ?? demoFolder { startMap(folder) };return }
         let p=NSOpenPanel();p.canChooseDirectories=true;p.canChooseFiles=false;p.allowsMultipleSelection=false
         p.directoryURL=FileManager.default.homeDirectoryForCurrentUser;p.prompt=L("Map","מפה")
         p.message=L("Choose the folder or drive to map. Sizes are measured on this Mac; nothing is moved or uploaded.","בחר תיקייה או כונן למיפוי. הגדלים נמדדים במק הזה; שום דבר לא מועבר או מועלה.")
