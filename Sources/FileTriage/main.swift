@@ -120,7 +120,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     func makeMenus() {
         let main = NSMenu(); let app = NSMenuItem(); main.addItem(app); let menu = NSMenu(); app.submenu = menu
-        let about = NSMenuItem(title: "About FileTriage", action: #selector(aboutApp), keyEquivalent: ""); about.target = self; menu.addItem(about)
+        let about = NSMenuItem(title: L("About FileTriage", "אודות FileTriage"), action: #selector(aboutApp), keyEquivalent: ""); about.target = self; menu.addItem(about)
         menu.addItem(withTitle: L("Quit FileTriage","סגור FileTriage"), action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         let edit = NSMenuItem(); edit.title = "Edit"; main.addItem(edit); edit.submenu = NSMenu(title:"Edit")
         for (title,selector,key) in [(L("Select all","בחר הכול"),#selector(selectAllCommand),"a"),(L("Undo Trash","שחזר מהפח"),#selector(undoTrash),"z")] {
@@ -131,7 +131,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         edit.submenu!.addItem(withTitle:"Paste",action:#selector(NSText.paste(_:)),keyEquivalent:"v")
         NSApp.mainMenu=main
     }
-    @objc func aboutApp() { show(L("FileTriage 0.1.0 beta", "FileTriage 0.1.0 בטא"), L("Offline file review. MIT license. Not affiliated with WhatsApp or Meta. Undo is available for this app session; Finder Trash remains available afterward.","סקירת קבצים מקומית. רישיון MIT. ללא שיוך ל־WhatsApp או Meta. שחזור באפליקציה זמין במהלך ההפעלה הנוכחית; הפח של Finder נשאר זמין לאחר מכן.")) }
+    @objc func aboutApp() { show(L("FileTriage 0.1.0 beta", "FileTriage 0.1.0 בטא"), "© 2026 Daniel Siman Tov\n" + L("Contact: ","יצירת קשר: ") + "daniel.simisi@gmail.com\n\n" + L("Offline file review. MIT license. Not affiliated with WhatsApp or Meta. Undo is available for this app session; Finder Trash remains available afterward.","סקירת קבצים מקומית. רישיון MIT. ללא שיוך ל־WhatsApp או Meta. שחזור באפליקציה זמין במהלך ההפעלה הנוכחית; הפח של Finder נשאר זמין לאחר מכן.")) }
     func show(_ title: String, _ detail: String) { let a=NSAlert();a.messageText=title;a.informativeText=detail;a.runModal() }
     @objc func chooseFolder() {
         guard !busy else { return }; let p=NSOpenPanel();p.canChooseDirectories=true;p.canChooseFiles=false;p.allowsMultipleSelection=false

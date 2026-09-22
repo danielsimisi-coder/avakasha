@@ -105,3 +105,9 @@ This is a first beta. Code compilation and automated tests are not substitutes f
 Primary controls support English and Hebrew. Some status and system error text remains English. Contributions to accessibility, localisation and synthetic-fixture coverage are welcome. See [CONTRIBUTING](CONTRIBUTING.md), [SECURITY](SECURITY.md), and [CHANGELOG](CHANGELOG.md).
 
 Released under the [MIT License](LICENSE). Built to help people decide what to keep.
+
+## Author and contact
+
+© 2026 **Daniel Siman Tov**. Contact: [daniel.simisi@gmail.com](mailto:daniel.simisi@gmail.com).
+
+FileTriage is available under the [MIT License](LICENSE).
