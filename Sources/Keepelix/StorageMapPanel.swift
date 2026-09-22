@@ -52,6 +52,9 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
     let crumbs = NSPopUpButton()
     let openButton = NSButton()
     let reviewButton = NSButton()
+    /// Shown when files changed since the map was measured; the numbers on screen are then out of date.
+    let rescanButton = NSButton()
+    var onRescan: (() -> Void)?
     let detail = NSStackView()
     private let detailTitle = NSTextField(wrappingLabelWithString: "")
     private let detailSize = NSTextField(labelWithString: "")
@@ -73,7 +76,8 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         crumbs.target = self; crumbs.action = #selector(jumpToCrumb); crumbs.font = .systemFont(ofSize: 12)
         crumbs.setAccessibilityLabel(L("Folder path", "נתיב התיקייה"))
         for (button, en, he, symbol, action) in [(openButton, "Open folder", "פתח תיקייה", "arrow.down.right.square", #selector(openSelected)),
-                                                  (reviewButton, "Review files here", "סקור קבצים כאן", "list.bullet.rectangle", #selector(reviewSelected))] {
+                                                  (reviewButton, "Review files here", "סקור קבצים כאן", "list.bullet.rectangle", #selector(reviewSelected)),
+                                                  (rescanButton, "Rescan", "מדוד מחדש", "arrow.clockwise", #selector(rescanTapped))] {
             button.title = L(en, he); button.target = self; button.action = action; button.bezelStyle = .rounded
             button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil); button.imagePosition = .imageLeading
             button.font = .systemFont(ofSize: 13, weight: .medium); button.setAccessibilityLabel(L(en, he))
@@ -81,7 +85,9 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         reviewButton.keyEquivalent = ""; reviewButton.toolTip = L("Show the files of this folder for review. Nothing is moved.", "הצג את קבצי התיקייה לסקירה. שום דבר לא מועבר.")
         openButton.toolTip = L("Return or ⌘↓ opens a folder in the map; ⌘↑ goes up.", "Return או ⌘↓ פותחים תיקייה במפה; ⌘↑ עולה רמה.")
         let spacer = NSView(); spacer.setContentHuggingPriority(.init(1), for: .horizontal)
-        let toolbar = NSStackView(views: [crumbs, spacer, openButton, reviewButton]); toolbar.spacing = 8; toolbar.alignment = .centerY
+        rescanButton.isHidden = true; rescanButton.contentTintColor = .systemOrange
+        rescanButton.toolTip = L("Files were moved or restored since this map was measured. Measure again to update the numbers.", "קבצים הועברו או שוחזרו מאז שהמפה נמדדה. מדוד מחדש כדי לעדכן את המספרים.")
+        let toolbar = NSStackView(views: [crumbs, spacer, rescanButton, openButton, reviewButton]); toolbar.spacing = 8; toolbar.alignment = .centerY
         crumbs.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         table.rowHeight = 30; table.intercellSpacing = NSSize(width: 12, height: 4); table.usesAlternatingRowBackgroundColors = false; table.style = .inset
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle; table.allowsMultipleSelection = false
@@ -171,6 +177,8 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         show(parent, selecting: current); window?.makeFirstResponder(table)
     }
     @objc func reviewSelected() { if let url = reviewTarget { onReview?(url) } else { NSSound.beep() } }
+    @objc private func rescanTapped() { onRescan?() }
+    func setStale(_ stale: Bool) { rescanButton.isHidden = !stale || isEmpty }
     @objc private func jumpToCrumb() {
         guard let current = current else { return }
         let trail = current.trail; let index = crumbs.indexOfSelectedItem

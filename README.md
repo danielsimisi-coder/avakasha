@@ -27,7 +27,7 @@ In one sentence: Keepelix is a Mac app that helps you free up space by showing w
 
 ## Where is the space?
 
-Click **Storage map** in the sidebar and choose a folder or a drive (your home folder is a good start). Keepelix measures every folder below it and lists them largest first, with a share bar and notes. Open a folder to go deeper; press **Review files here** to switch to the file review of that folder, sorted by size. **Back to files** returns to the list, and **Storage map** in the header jumps back to the map at the folder you are reviewing, without measuring again.
+Click **Storage map** in the sidebar and choose a folder or a drive (your home folder is a good start). Keepelix measures every folder below it and lists them largest first, with a share bar and notes. Open a folder to go deeper; press **Review files here** to switch to the file review of that folder, sorted by size. **Back to files** returns to the list, and **Storage map** in the header jumps back to the map at the folder you are reviewing, without measuring again. After you move or restore files the map shows a **Rescan** button and says its numbers are out of date; Refresh in the header does the same.
 
 The map is read-only. It never moves anything; Delete does nothing there. It reports what it could not measure instead of guessing:
 
@@ -64,7 +64,7 @@ The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
 | Stop any scan, map or comparison with the red Stop button or Esc and keep what was found | | |
 | Right-click to reveal the original in Finder; drag rows out to Finder, WhatsApp or any window (copies) | Hidden, protected and bundle folders are labelled in the map | Progress, cancellation and per-file errors |
 | WhatsApp media filter: group chats, personal chats, status (by folder name only) | | |
-| Explicit resume of your last folder and position | Hard links are not treated as extra copies | No private file inventory in the app bundle |
+| The empty screen offers to continue with your last folder | Hard links are not treated as extra copies | No private file inventory in the app bundle |
 
 ## Try the beta
 

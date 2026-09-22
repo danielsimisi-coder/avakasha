@@ -6,3 +6,4 @@ dist/
 .env*
 *.p12
 *.mobileprovision
+.claude/

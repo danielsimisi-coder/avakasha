@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-beta.9
+
+- The storage map shows a Rescan button and says its numbers are out of date after files are moved to Trash or restored.
+- The Resume button is gone; the empty screen offers "Continue: ~/folder" for the last folder instead.
+
 ## 0.1.0-beta.8
 
 - Star important files with S or the star column. A filter shows starred files only or hides them. Stars are kept in this app's local preferences by path; files are not modified. Starred files are never auto-selected as extra copies, and the Trash confirmation warns when starred files are included.

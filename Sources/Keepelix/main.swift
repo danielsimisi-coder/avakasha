@@ -115,6 +115,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     var tips: NSTextField!
     var retryButton: NSButton!
     var mapButton: NSButton!
+    /// True once files were moved or restored after the current map was measured.
+    var mapStale = false
+    let continueLink = PathLink()
     var rescanButton: NSButton!
     var cancellable = false // true while a scan, map or analysis can be stopped with partial results
     var escapeMonitor: Any?
@@ -160,13 +163,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         NSLayoutConstraint.activate([sidebar.widthAnchor.constraint(equalToConstant:216),sidebarContent.leadingAnchor.constraint(equalTo:sidebar.leadingAnchor,constant:20),sidebarContent.trailingAnchor.constraint(equalTo:sidebar.trailingAnchor,constant:-16),sidebarContent.topAnchor.constraint(equalTo:sidebar.topAnchor,constant:24),sidebarContent.bottomAnchor.constraint(equalTo:sidebar.bottomAnchor,constant:-24),locationList.widthAnchor.constraint(equalTo:sidebarContent.widthAnchor)])
         for b in locationButtons { b.widthAnchor.constraint(equalTo:locationList.widthAnchor).isActive=true }
         choose.font = .systemFont(ofSize:11);choose.controlSize = .small
-        let resume=button("Resume","המשך סקירה","clock.arrow.circlepath",#selector(resumeFolder))
         let rescan=button("Refresh","רענן","arrow.clockwise",#selector(rescanFolder));rescanButton=rescan
         headingLabel=label(L("Your files","הקבצים שלך"),23,.semibold)
         let heading=column([headingLabel],6)
         mapButton=button("Storage map","מפת אחסון","chart.pie",#selector(showStorageMap))
         mapButton.toolTip=L("See which folders take the space in this location.","ראה אילו תיקיות תופסות את המקום במיקום הזה.")
-        let header=row([heading,spacer(),mapButton,resume,rescan])
+        let header=row([heading,spacer(),mapButton,rescan])
         folderLabel.font = .monospacedSystemFont(ofSize:11,weight:.regular);folderLabel.textColor = .secondaryLabelColor;folderLabel.lineBreakMode = .byTruncatingMiddle
         folderLabel.stringValue=L("Choose a location from the sidebar to begin","בחר מיקום מהסרגל הצדדי כדי להתחיל")
         search.placeholderString=L("Search files…","חפש קבצים…");search.delegate=self;search.controlSize = .large
@@ -229,13 +231,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         emptyListDetail=label(L("Choose a location from the sidebar","בחר מיקום מהסרגל הצדדי"),12,.regular,true)
         let emptyIcon=NSImageView(image:NSImage(systemSymbolName:"folder.badge.magnifyingglass",accessibilityDescription:nil) ?? NSImage());emptyIcon.contentTintColor = .tertiaryLabelColor
         emptyIcon.widthAnchor.constraint(equalToConstant:40).isActive=true;emptyIcon.heightAnchor.constraint(equalToConstant:40).isActive=true
-        emptyList=column([emptyIcon,emptyListTitle,emptyListDetail],12);emptyList.alignment = .centerX;emptyList.translatesAutoresizingMaskIntoConstraints=false;listHost.addSubview(emptyList)
+        continueLink.isHidden=true;continueLink.alignment = .center;continueLink.setAccessibilityLabel(L("Continue with the last folder","המשך עם התיקייה האחרונה"))
+        continueLink.onOpen={[weak self] in self?.resumeFolder()}
+        emptyList=column([emptyIcon,emptyListTitle,emptyListDetail,continueLink],12);emptyList.alignment = .centerX;emptyList.translatesAutoresizingMaskIntoConstraints=false;listHost.addSubview(emptyList)
         NSLayoutConstraint.activate([scroll.leadingAnchor.constraint(equalTo:listHost.leadingAnchor),scroll.trailingAnchor.constraint(equalTo:listHost.trailingAnchor),scroll.topAnchor.constraint(equalTo:listHost.topAnchor),scroll.bottomAnchor.constraint(equalTo:listHost.bottomAnchor),emptyList.centerXAnchor.constraint(equalTo:listHost.centerXAnchor),emptyList.centerYAnchor.constraint(equalTo:listHost.centerYAnchor)])
         mapPanel.translatesAutoresizingMaskIntoConstraints=false;listHost.addSubview(mapPanel,positioned:.below,relativeTo:emptyList);mapPanel.isHidden=true
         NSLayoutConstraint.activate([mapPanel.leadingAnchor.constraint(equalTo:listHost.leadingAnchor,constant:12),mapPanel.trailingAnchor.constraint(equalTo:listHost.trailingAnchor,constant:-12),mapPanel.topAnchor.constraint(equalTo:listHost.topAnchor,constant:12),mapPanel.bottomAnchor.constraint(equalTo:listHost.bottomAnchor)])
         mapPanel.onReview={[weak self] url in self?.reviewFromMap(url)}
         mapPanel.onReveal={[weak self] url in self?.revealFolder(url)}
         mapPanel.onSelectionChange={[weak self] in self?.refreshEmptyState()}
+        mapPanel.onRescan={[weak self] in if let target=self?.mapRoot { self?.startMap(target) }}
         previewHost.addSubview(mapPanel.detail);mapPanel.detail.translatesAutoresizingMaskIntoConstraints=false;mapPanel.detail.isHidden=true
         NSLayoutConstraint.activate([mapPanel.detail.leadingAnchor.constraint(equalTo:previewHost.leadingAnchor,constant:22),mapPanel.detail.trailingAnchor.constraint(equalTo:previewHost.trailingAnchor,constant:-22),mapPanel.detail.topAnchor.constraint(equalTo:previewHost.topAnchor,constant:26)])
         let split=NSSplitView();split.isVertical=true;split.dividerStyle = .thin;split.addArrangedSubview(listHost);split.addArrangedSubview(previewHost)
@@ -550,6 +555,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         mapButton.image = NSImage(systemSymbolName: on ? "list.bullet" : "chart.pie",accessibilityDescription:nil);mapButton.setAccessibilityLabel(mapButton.title)
         if on {
             if !demoMode { folderLabel.stringValue = mapRoot?.path ?? folderLabel.stringValue }
+            mapPanel.setStale(mapStale)
+            if mapStale, let result=mapPanel.result { status.stringValue=mapSummary(result)+" · "+L("changed since measured · Rescan","השתנה מאז המדידה · מדוד מחדש") }
             primary.previewItem=nil;comparison.previewItem=nil;stopVideo();previewPlaceholder.isHidden=true;primary.isHidden=true;comparison.isHidden=true
         } else {
             if !demoMode { folderLabel.stringValue = root?.path ?? L("Choose a location from the sidebar to begin","בחר מיקום מהסרגל הצדדי כדי להתחיל") }
@@ -566,6 +573,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             emptyList?.isHidden = !shown.isEmpty
             emptyListTitle?.stringValue = busy ? L("Scanning…","סורק…") : (root == nil ? L("Start somewhere simple","מתחילים בתיקייה אחת") : L("No matching files","אין קבצים מתאימים"))
             emptyListDetail?.stringValue = busy ? L("Reading names and sizes only. Cancel keeps what was found.","קורא רק שמות וגדלים. ביטול שומר את מה שנמצא.") : (root == nil ? L("Choose a location from the sidebar","בחר מיקום מהסרגל הצדדי") : L("Try another filter or location","נסה מסנן אחר או מיקום אחר"))
+            let last=preferences.string(forKey:"lastFolder")
+            continueLink.isHidden = busy || root != nil || last == nil || demoMode
+            continueLink.stringValue = last.map{ L("Continue: ","המשך: ")+displayPath(URL(fileURLWithPath:$0)) } ?? "";continueLink.toolTip=last
         }
     }
     @objc func chooseMapFolder() {
@@ -600,7 +610,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
                     DispatchQueue.main.async{self.status.stringValue=L("Measuring: ","מודד: ")+"\(entries) "+L("items","פריטים")+" · "+bytes(total)}
                 }
                 DispatchQueue.main.async {
-                    self.setBusy(false);self.mapPanel.load(result);self.refreshEmptyState()
+                    self.setBusy(false);self.mapStale=false;self.mapPanel.load(result);self.mapPanel.setStale(false);self.refreshEmptyState()
                     self.status.stringValue=self.mapSummary(result);self.window.makeFirstResponder(self.mapPanel.table)
                 }
             } catch {DispatchQueue.main.async{self.setBusy(false);self.refreshEmptyState();self.show(L("Cannot map this folder","לא ניתן למפות את התיקייה"),error.localizedDescription)}}
@@ -975,7 +985,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             DispatchQueue.main.async {self.finishMove(result,nextRow:row)}
         }
     }
+    /// After files move or come back, the last map no longer adds up; say so instead of showing stale totals as current.
+    func markMapStale() { guard mapPanel.result != nil else { return };mapStale=true;mapPanel.setStale(true) }
     func finishMove(_ result:MoveResult,nextRow:Int) {
+        if !result.tickets.isEmpty { markMapStale() }
         let moved=Set(result.tickets.map{$0.original.path});files.removeAll{moved.contains($0.id)}
         if !moved.isDisjoint(with:starred) { starred.subtract(moved);persistStars() }
         exact=[];similar=[];guards=[:];mode.selectItem(at:0);setBusy(false);modeChanged()
@@ -1000,6 +1013,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     func finishRestore(_ result:RestoreResult?) {
         setBusy(false);guard let result=result else{return}
+        if !result.restored.isEmpty { markMapStale() }
         if let root=root {
             for url in result.restored {
                 if let record=try? FileRecord(url:url),(try? FileSafety.validate(record,root:root)) != nil {
@@ -1037,6 +1051,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(Self.presetURL(6,home:temp) == nil)
             setBusy(true);precondition(locationButtons.allSatisfy{ !$0.isEnabled });setBusy(false)
             precondition(locationButtons.allSatisfy{ $0.isEnabled })
+            preferences.set(temp.path,forKey:"lastFolder");refreshEmptyState();precondition(!continueLink.isHidden && continueLink.stringValue.hasSuffix(displayPath(temp)),"Empty state offers to continue with the last folder")
             root = temp
             files = try Scanner.scan(root:temp, token:CancellationToken()).files
             sizeFilter.selectItem(at:0); applyFilters()
@@ -1188,6 +1203,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
                 table.keyDown(with:event);settle()
             }
             key(51);precondition(!FileManager.default.fileExists(atPath:target.path) && history.canUndo)
+            precondition(mapStale && !mapPanel.rescanButton.isHidden,"Moving files marks the last map as out of date")
             let count=files.count;key(51,[],true);precondition(files.count == count,"Held Delete must not trash the next file")
             key(6,[.command]);precondition(FileManager.default.fileExists(atPath:target.path) && history.canRedo)
             key(6,[.command,.shift]);precondition(!FileManager.default.fileExists(atPath:target.path) && history.canUndo)
