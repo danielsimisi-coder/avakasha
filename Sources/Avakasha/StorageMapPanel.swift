@@ -77,6 +77,8 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
     var onReview: ((URL) -> Void)?
     var onSelectionChange: (() -> Void)?
     var onReveal: ((URL) -> Void)?
+    /// The read-only demo hides absolute paths, which would only show a temporary folder.
+    var showsPaths = true
     /// Names loaded on request from WhatsApp's chat list; empty until the user asks.
     var chatNames: [String: ChatInfo] = [:] { didSet { table.reloadData() } }
 
@@ -103,7 +105,7 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         trashButton.toolTip = L("Measures the folder again, shows what it holds and asks before moving the whole folder to Trash. Not for bundles, hidden folders or folders with unmeasured items.", "מודד את התיקייה מחדש, מציג מה יש בה ומבקש אישור לפני העברת התיקייה כולה לפח. לא לחבילות, לתיקיות מוסתרות או לתיקיות עם פריטים שלא נמדדו.")
         let toolbar = NSStackView(views: [crumbs, spacer, rescanButton, openButton, reviewButton, largestButton, trashButton]); toolbar.spacing = 8; toolbar.alignment = .centerY
         table.onTrash = { [weak self] in self?.trashTapped() }
-        crumbs.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        crumbs.setContentCompressionResistancePriority(.defaultLow, for: .horizontal); crumbs.widthAnchor.constraint(greaterThanOrEqualToConstant: 150).isActive = true
         table.rowHeight = 30; table.intercellSpacing = NSSize(width: 12, height: 4); table.usesAlternatingRowBackgroundColors = false; table.style = .inset
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle; table.allowsMultipleSelection = false
         table.setAccessibilityLabel(L("Storage map", "מפת אחסון"))
@@ -267,7 +269,7 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         let root = result?.root
         detailSize.stringValue = bytes(row?.bytes ?? current.bytes)
         detailTitle.stringValue = row?.node == nil && row != nil ? L("Files directly in ", "קבצים ישירות בתוך ") + current.name : node.name
-        detailPath.stringValue = (node.url.path as NSString).abbreviatingWithTildeInPath; detailPath.toolTip = node.url.path; detailPath.isHidden = false
+        detailPath.stringValue = (node.url.path as NSString).abbreviatingWithTildeInPath; detailPath.toolTip = node.url.path; detailPath.isHidden = !showsPaths
         var facts: [String] = []
         if row?.node == nil, row != nil { facts.append("\(current.directFiles) " + L("files", "קבצים")) }
         else if !node.isUnreadable { facts.append("\(node.files) " + L("files", "קבצים") + " · \(node.directories) " + L("folders", "תיקיות")) }

@@ -374,6 +374,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             let featured = ProcessInfo.processInfo.arguments.contains("--demo-video") ? "Harbour clip.mov" : "Coastal morning.png"
             if let row=shown.firstIndex(where:{$0.name == featured}) {table.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false);previewOpen=true;updatePreview()}
             if ProcessInfo.processInfo.arguments.contains("--demo-overview") { setOverview(true) }
+            if ProcessInfo.processInfo.arguments.contains("--demo-older") { showOlderFiles() }
+            mapPanel.showsPaths=false;pathLabel.isHidden=true
+            if overviewMode && !ProcessInfo.processInfo.arguments.contains("--demo-overview") { setOverview(false) } // the demo shows files unless asked for the overview
+            window.minSize=NSSize(width:1190,height:768);window.setContentSize(NSSize(width:1190,height:768));window.center() // pin the demo window size
+            }
             if ProcessInfo.processInfo.arguments.contains("--demo-map") {
                 mapPanel.load(try StorageMapper.map(root:folder,token:CancellationToken()));mapRoot=folder;setMapMode(true)
                 folderLabel.stringValue=L("Example collection · generated demo files","אוסף לדוגמה · קבצים מלאכותיים")
