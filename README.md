@@ -70,7 +70,7 @@ The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
 
 1. Get the ZIP from [Releases](https://github.com/danielsimisi-coder/keepelix/releases), extract it, and open Keepelix.
 2. Click **Storage map** to see which folders fill a folder or drive, then **Review files here**. Or click **WhatsApp**, **Downloads**, **Movies**, **Pictures**, **Documents** or **Desktop**, or choose **Other folder or drive**. Each scans only the selected location. WhatsApp checks its local media folder on click and offers a folder picker if unavailable; no account connection is needed. Pictures skips Photos library packages.
-3. Select a row and press **Space**. Use **↓** or **Keep & next** to continue. Clicking a location that is already loaded shows it again without rescanning; **Refresh** rescans.
+3. Select a row; the preview is open by default. **Space** plays or pauses a video. Use **↓** or **Keep & next** to continue. Clicking a location that is already loaded shows it again without rescanning; **Refresh** rescans.
 4. Use **⌘-click** or **Shift-click** to select several files. The count and size are shown before you confirm **Move to Trash**.
 
 **Signing status:** the initial private beta is ad-hoc signed, **not Apple-notarized**. Gatekeeper may block a downloaded build. Do not disable Gatekeeper; building from source is the alternative until a Developer ID-signed, notarized release is available. See [distribution instructions](docs/DISTRIBUTION.md).
@@ -79,7 +79,7 @@ The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
 
 | Key | Action |
 |---|---|
-| `Space` | Toggle the selected file's preview |
+| `Space` | Play or pause a video; otherwise toggle the preview (open by default) |
 | `↑` / `↓` | Move through the list |
 | `⌘` + click | Add or remove a file from the selection |
 | `Shift` + click | Select a range |

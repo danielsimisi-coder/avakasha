@@ -13,7 +13,7 @@ final class FileTable: NSTableView {
     weak var owner: AppController?
     override func keyDown(with event: NSEvent) {
         if event.keyCode == 51 || event.keyCode == 117 { if !event.isARepeat {owner?.trashSelection()};return }
-        if event.keyCode == 49 { owner?.togglePreview(); return }
+        if event.keyCode == 49 { if !event.isARepeat { owner?.spacePressed() }; return }
         if event.modifierFlags.contains(.command) {
             if event.keyCode == 0 { owner?.selectAllFiles(); return }
             if event.keyCode == 6 { if event.modifierFlags.contains(.shift) {owner?.redoTrash()}else{owner?.undoTrash()};return }
@@ -89,7 +89,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     var token = CancellationToken()
     let work = DispatchQueue(label: "Keepelix.background", qos: .userInitiated)
     var busy = false
-    var previewOpen = false
+    var previewOpen = true // the preview pane is open by default; Space plays or pauses a video, otherwise toggles the preview
     var contextRow = -1
     var history = TrashHistory()
     var folderHistories: [String: TrashHistory] = [:]
@@ -239,7 +239,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         spinner.style = .spinning;spinner.controlSize = .small;spinner.isDisplayedWhenStopped=false
         status.font = .systemFont(ofSize:11);status.textColor = .secondaryLabelColor;status.lineBreakMode = .byTruncatingTail
         let footer=row([spinner,status,spacer(),cancelButton],8)
-        tips=label(L("Space · Preview     Delete · Trash     ⌘Z · Undo","רווח · תצוגה     Delete · פח     ⌘Z · שחזור"),11,.regular,true)
+        tips=label(L("Space · Play/Pause or Preview     Delete · Trash     ⌘Z · Undo","רווח · נגן/השהה או תצוגה     Delete · פח     ⌘Z · שחזור"),11,.regular,true)
         let bottom=row([tips,spacer()])
         let content=column([header,folderLabel,filters,analysis,ageHint,workspace,selection,divider(),review,footer,bottom],12)
         content.setCustomSpacing(20,after:header);content.setCustomSpacing(16,after:folderLabel)
@@ -496,7 +496,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         reviewOnlyViews.forEach{$0.isHidden=on}
         scroll.isHidden=on;mapPanel.isHidden = !on;mapPanel.detail.isHidden = !on
         headingLabel.stringValue = on ? L("Where is the space?","איפה המקום?") : L("Your files","הקבצים שלך")
-        tips.stringValue = on ? L("Return · Open folder     ⌘↑ · Up     Review files here · Switch to file review","Return · פתיחת תיקייה     ⌘↑ · למעלה     סקור קבצים כאן · מעבר לסקירת קבצים") : L("Space · Preview     Delete · Trash     ⌘Z · Undo","רווח · תצוגה     Delete · פח     ⌘Z · שחזור")
+        tips.stringValue = on ? L("Return · Open folder     ⌘↑ · Up     Review files here · Switch to file review","Return · פתיחת תיקייה     ⌘↑ · למעלה     סקור קבצים כאן · מעבר לסקירת קבצים") : L("Space · Play/Pause or Preview     Delete · Trash     ⌘Z · Undo","רווח · נגן/השהה או תצוגה     Delete · פח     ⌘Z · שחזור")
         mapButton.title = on ? L("Back to files","חזרה לקבצים") : L("Storage map","מפת אחסון")
         mapButton.image = NSImage(systemSymbolName: on ? "list.bullet" : "chart.pie",accessibilityDescription:nil);mapButton.setAccessibilityLabel(mapButton.title)
         if on {
@@ -689,6 +689,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     @objc func deselect(){guard !busy,!mapMode else{return};guards=[:];table.deselectAll(nil);updateSelection()}
     @objc func nextFile(){guard !busy,!shown.isEmpty else{return};let i=min(max(table.selectedRow+1,0),shown.count-1);table.selectRowIndexes(IndexSet(integer:i),byExtendingSelection:false);table.scrollRowToVisible(i);window.makeFirstResponder(table)}
     @objc func togglePreview(){guard !busy else{return};previewOpen.toggle();updatePreview();window.makeFirstResponder(table)}
+    func spacePressed(){ guard !busy else{return}; if !mapMode, !videoHost.isHidden, videoPlayer.player != nil { togglePlayback() } else { togglePreview() } }
     func stopVideo(){
         if let observer=timeObserver { videoPlayer?.player?.removeTimeObserver(observer);timeObserver=nil }
         videoPlayer?.player?.pause();videoPlayer?.player=nil;videoHost?.isHidden=true
@@ -887,6 +888,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(table.menu(for:event)?.items.count == 1 && contextRow == row)
             mode.selectItem(at:0);modeChanged();selectAllFiles();deselect()
             table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false)
+            precondition(previewOpen && primary.previewItem != nil,"The preview is open by default");togglePreview();precondition(primary.previewItem == nil)
             togglePreview();precondition(primary.previewItem != nil)
             precondition(pathLabel.stringValue == displayPath(selectedFiles[0].url) && pathLabel.toolTip == selectedFiles[0].url.path,"The selected file's path must be shown")
             precondition(!kindBadge.isHidden && kindBadge.stringValue.contains(Self.kindTitle(.document).uppercased()) && videoHost.isHidden,"Text files show a document badge and no player")
@@ -895,6 +897,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             table.selectRowIndexes(IndexSet(integer:shown.firstIndex{$0.url.lastPathComponent == "Synthetic clip.mov"}!),byExtendingSelection:false)
             precondition(!videoHost.isHidden && videoPlayer.player != nil && videoPlayer.player?.rate == 0 && primary.isHidden,"Videos open in the inline player, paused")
             togglePlayback();precondition(videoPlayer.player?.rate != 0);togglePlayback();precondition(videoPlayer.player?.rate == 0)
+            let space=NSEvent.keyEvent(with:.keyDown,location:.zero,modifierFlags:[],timestamp:0,windowNumber:window.windowNumber,context:nil,characters:" ",charactersIgnoringModifiers:" ",isARepeat:false,keyCode:49)!
+            table.keyDown(with:space);precondition(videoPlayer.player?.rate != 0 && previewOpen,"Space plays a video instead of closing the preview")
+            table.keyDown(with:space);precondition(videoPlayer.player?.rate == 0 && previewOpen,"Space pauses it")
             toggleMute();precondition(videoPlayer.player?.isMuted == true);toggleMute()
             togglePreview();precondition(videoHost.isHidden && videoPlayer.player == nil,"Closing the preview releases the video");togglePreview()
             files.removeAll{$0.url == clip};try FileManager.default.removeItem(at:clip);applyFilters()
