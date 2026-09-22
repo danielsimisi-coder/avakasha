@@ -94,7 +94,11 @@ The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
 
 ## WhatsApp: groups and personal chats
 
-WhatsApp for Mac keeps each chat's media in a folder named after the chat identifier. When such folders are in the scanned location, a **chat filter** appears: group chats, personal chats, or status and broadcasts. This uses only the folder names. Keepelix never reads the chat database, so contact and group names are not available; the folder identifier is what you see. The storage map labels these folders the same way.
+WhatsApp for Mac keeps each chat's media in a folder named after the chat identifier. When such folders are in the scanned location, a **chat filter** appears: group chats, personal chats, status and broadcasts, and then every chat found in the scan, largest first. By default this uses only the folder names, so you see identifiers.
+
+**Chat names** is a separate, explicit step. Press **Chat names…** and confirm: Keepelix opens WhatsApp's local chat list read-only and reads only each chat's identifier, display name and type, to label folders and the filter. Messages, contacts and media references are never read, nothing is stored and nothing leaves the Mac. If WhatsApp reports the list as busy, close WhatsApp and try again. The storage map shows the same names.
+
+**Stop auto-download…** appears next to the chat filter (and in the Keepelix menu). WhatsApp for Mac has no public link straight to a settings pane, so the button opens WhatsApp and shows the path: Settings › Storage › Media auto-download. Turning those off stops new media from piling up.
 
 ## Drag files out
 
@@ -150,7 +154,7 @@ docs/                    Privacy, safety, release and contributor guidance
 
 ## Status and contribution
 
-This is beta 5. Code compilation and automated tests are not substitutes for testing on every macOS version. The Intel slice is cross-built; real Intel-machine verification and clean-Mac Gatekeeper verification are release checklist items, not implied claims.
+This is beta 6. Code compilation and automated tests are not substitutes for testing on every macOS version. The Intel slice is cross-built; real Intel-machine verification and clean-Mac Gatekeeper verification are release checklist items, not implied claims.
 
 The interface is English by default. **Keepelix › Language › עברית** switches the whole app to Hebrew with right-to-left layout on the next launch (the choice is stored for this app only). Contributions to accessibility, localisation and synthetic-fixture coverage are welcome. See [CONTRIBUTING](CONTRIBUTING.md), [SECURITY](SECURITY.md), and [CHANGELOG](CHANGELOG.md).
 

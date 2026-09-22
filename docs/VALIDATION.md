@@ -21,6 +21,10 @@ The final independent pass identified a mode-transition keeper-guard bug. Changi
 
 Beta 2 fixes a packaged-only startup crash: production now uses `UserDefaults.standard`, and packaging executes `--launch-check` inside the signed bundle using the production preferences path. This initializes the interface without opening a window or scanning files. CI now builds the universal package and runs this check plus the release payload audit.
 
+## Beta 6 checks
+
+44 core cases: the chat-list reader is exercised on a synthetic SQLite database (names resolved, unknown identifiers ignored, unexpected schema and missing file rejected, database bytes unchanged and no write-ahead files created). The hidden UI smoke builds a synthetic chat list, loads it, and filters by a named chat.
+
 ## Beta 5 checks
 
 42 core cases, including chat-folder classification by folder name only. The hidden UI smoke now also checks the path label and type badge for the selection, the "Item N of M" counter, that a generated `.mov` opens in the inline player paused, play/pause and mute toggles and Space driving them, that closing the preview releases the player, Shift+arrow focus tracking, drag-out pasteboard writers for valid rows only, and the chat filter appearing only when chat folders exist. Visual check on the read-only demo with a generated clip.

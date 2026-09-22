@@ -2,6 +2,7 @@ import Cocoa
 import Quartz
 import AVKit
 import ImageIO
+import SQLite3
 import KeepelixCore
 
 /// Interface language. English by default; Hebrew is an explicit choice in Keepelix › Language and applies on the next launch.
@@ -53,6 +54,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     let groupPicker = NSPopUpButton()
     let agePicker = NSPopUpButton()
     let chatFilter = NSPopUpButton()
+    var chatNamesButton: NSButton!
+    var autoDownloadButton: NSButton!
+    var chatNames: [String: ChatInfo] = [:]
+    var chatNamesSource: URL?
     let sortPicker = NSPopUpButton()
     let ageHint = NSTextField(labelWithString:L("Based on last modification — age alone does not mean a file is unused.","לפי השינוי האחרון — גיל הקובץ לא מעיד בהכרח שלא השתמשת בו."))
     let status = NSTextField(labelWithString: "")
@@ -109,7 +114,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         window = NSWindow(contentRect:NSRect(x:0,y:0,width:1320,height:820),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
-        window.delegate=self; window.title="Keepelix · 0.1.0 beta 5"
+        window.delegate=self; window.title="Keepelix · 0.1.0 beta 6"
         window.minSize=NSSize(width:1120,height:720);window.center();window.titlebarAppearsTransparent=true
         func label(_ text:String,_ size:CGFloat,_ weight:NSFont.Weight = .regular,_ secondary:Bool = false)->NSTextField {
             let v=NSTextField(labelWithString:text);v.font = .systemFont(ofSize:size,weight:weight);v.textColor=secondary ? .secondaryLabelColor : .labelColor;return v
@@ -166,6 +171,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         sortPicker.addItems(withTitles:[L("Largest first","הגדולים תחילה"),L("Smallest first","הקטנים תחילה"),L("Oldest first","הישנים תחילה"),L("Newest first","החדשים תחילה"),L("Name A–Z","שם א–ת"),L("Name Z–A","שם ת–א")]);sortPicker.target=self;sortPicker.action = #selector(changeSort);sortPicker.font = .systemFont(ofSize:12)
         chatFilter.addItems(withTitles:[L("All chats","כל השיחות"),L("Group chats","קבוצות"),L("Personal chats","שיחות אישיות"),L("Status & broadcasts","סטטוס ותפוצה")]);chatFilter.target=self;chatFilter.action = #selector(applyFilters);chatFilter.font = .systemFont(ofSize:12);chatFilter.isHidden=true
         chatFilter.setAccessibilityLabel(L("Chat type","סוג שיחה"));chatFilter.toolTip=L("By WhatsApp's per-chat folder names only. Chat databases are not read, so contact and group names are not shown.","לפי שמות תיקיות השיחה של ווטסאפ בלבד. מסד השיחות לא נקרא, ולכן שמות אנשי קשר וקבוצות אינם מוצגים.")
+        chatNamesButton=button("Chat names…","שמות שיחות…","person.2",#selector(loadChatNamesFromButton));chatNamesButton.controlSize = .small;chatNamesButton.font = .systemFont(ofSize:11);chatNamesButton.isHidden=true
+        chatNamesButton.toolTip=L("Read the chat list from WhatsApp's local database (read-only) to show group and contact names instead of folder identifiers.","קריאת רשימת השיחות ממסד הנתונים המקומי של ווטסאפ (לקריאה בלבד) כדי להציג שמות קבוצות ואנשי קשר במקום מזהי תיקיות.")
+        autoDownloadButton=button("Stop auto-download…","עצירת הורדה אוטומטית…","arrow.down.circle.dotted",#selector(openWhatsAppAutoDownload));autoDownloadButton.controlSize = .small;autoDownloadButton.font = .systemFont(ofSize:11);autoDownloadButton.isHidden=true
+        autoDownloadButton.toolTip=L("Opens WhatsApp and shows where its media auto-download setting is, so new media stops piling up.","פותח את ווטסאפ ומראה איפה הגדרת ההורדה האוטומטית של מדיה, כדי שמדיה חדשה תפסיק להצטבר.")
         let filters=row([search,sizeFilter,kindFilter,chatFilter,sortPicker]);search.setContentHuggingPriority(.init(1),for:.horizontal)
         mode.addItems(withTitles:[L("All files","כל הקבצים"),L("Exact duplicates","כפילויות זהות"),L("Similar images","תמונות דומות"),L("Older files","קבצים ישנים")]);mode.target=self;mode.action = #selector(modeChanged)
         groupPicker.target=self;groupPicker.action = #selector(applyFilters)
@@ -173,7 +182,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let similarButton=button("Compare images","השווה תמונות","photo.on.rectangle.angled",#selector(findSimilarImages))
         agePicker.addItems(withTitles:[L("Not modified in 6 months","לא שונו בחצי שנה"),L("Not modified in 1 year","לא שונו בשנה"),L("Not modified in 2 years","לא שונו בשנתיים"),L("Not modified in 5 years","לא שונו בחמש שנים")]);agePicker.selectItem(at:1);agePicker.target=self;agePicker.action = #selector(applyFilters)
         ageHint.font = .systemFont(ofSize:11);ageHint.textColor = .secondaryLabelColor
-        let analysis=row([mode,groupPicker,agePicker,spacer(),exactButton,similarButton])
+        let analysis=row([mode,groupPicker,agePicker,chatNamesButton,autoDownloadButton,spacer(),exactButton,similarButton])
         scroll=NSScrollView();scroll.hasVerticalScroller=true;scroll.hasHorizontalScroller=true;scroll.autohidesScrollers=true
         table.frame=NSRect(x:0,y:0,width:540,height:440);table.autoresizingMask=[.width];table.owner=self;table.delegate=self;table.dataSource=self
         table.setDraggingSourceOperationMask(.copy,forLocal:false) // dragging out copies; Keepelix never moves files without confirmation
@@ -333,6 +342,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             let item = NSMenuItem(title:title,action:selector,keyEquivalent:key); item.target=self; edit.submenu!.addItem(item)
         }
         let redoItem=NSMenuItem(title:L("Redo","בצע שוב"),action:#selector(redoCommand),keyEquivalent:"z");redoItem.keyEquivalentModifierMask=[.command,.shift];redoItem.target=self;edit.submenu!.addItem(redoItem)
+        let autoDownload=NSMenuItem(title:L("Stop WhatsApp auto-download…","עצירת הורדה אוטומטית בווטסאפ…"),action:#selector(openWhatsAppAutoDownload),keyEquivalent:"");autoDownload.target=self;menu.insertItem(autoDownload,at:1)
         menu.insertItem(.separator(),at:1)
         let confirmation=NSMenuItem(title:L("Confirm before Trash","אישור לפני העברה לפח"),action:#selector(toggleTrashConfirmation(_:)),keyEquivalent:"");confirmation.target=self;confirmation.state=preferences.bool(forKey:"skipTrashConfirmation") ? .off : .on;menu.insertItem(confirmation,at:2);confirmationMenuItem=confirmation
         // Standard text editing remains available in the search field.
@@ -385,7 +395,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         }
         return true
     }
-    @objc func aboutApp() { show(L("Keepelix 0.1.0 beta 5", "Keepelix 0.1.0 בטא 5"), "© 2026 Daniel Siman Tov\n" + L("Contact: ","יצירת קשר: ") + "daniel.simisi@gmail.com\n\n" + L("Offline file review. MIT license. Not affiliated with WhatsApp or Meta. Undo is available for this app session; Finder Trash remains available afterward.","סקירת קבצים מקומית. רישיון MIT. ללא שיוך ל־WhatsApp או Meta. שחזור באפליקציה זמין במהלך ההפעלה הנוכחית; הפח של Finder נשאר זמין לאחר מכן.")) }
+    @objc func aboutApp() { show(L("Keepelix 0.1.0 beta 6", "Keepelix 0.1.0 בטא 6"), "© 2026 Daniel Siman Tov\n" + L("Contact: ","יצירת קשר: ") + "daniel.simisi@gmail.com\n\n" + L("Offline file review. MIT license. Not affiliated with WhatsApp or Meta. Undo is available for this app session; Finder Trash remains available afterward.","סקירת קבצים מקומית. רישיון MIT. ללא שיוך ל־WhatsApp או Meta. שחזור באפליקציה זמין במהלך ההפעלה הנוכחית; הפח של Finder נשאר זמין לאחר מכן.")) }
     func show(_ title: String, _ detail: String) {
         if smokeMode { print("Alert suppressed in smoke mode: \(title) — \(detail)"); return }
         let a=NSAlert();a.messageText=title;a.informativeText=detail;a.runModal()
@@ -463,7 +473,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             if demoMode && (b.action == #selector(trashSelection) || b.action == #selector(undoTrash) || b.action == #selector(redoTrash)) { b.isEnabled=false }
             if b.action == #selector(resumeFolder) { b.isEnabled = !busy && preferences.string(forKey:"lastFolder") != nil }
         }; cancelButton?.isEnabled=busy
-        [sizeFilter,kindFilter,mode,groupPicker,agePicker,sortPicker,chatFilter].forEach{$0.isEnabled = !busy};search.isEnabled = !busy
+        [sizeFilter,kindFilter,mode,groupPicker,agePicker,sortPicker,chatFilter].forEach{$0.isEnabled = !busy};search.isEnabled = !busy;chatNamesButton?.isEnabled = !busy
         undoButton?.isEnabled = !busy && !demoMode && !mapMode && history.canUndo
         redoButton?.isEnabled = !busy && !demoMode && !mapMode && history.canRedo
         if !busy { retryButton?.isHidden = history.blockedCount == 0 } // history is only touched by the work queue while busy
@@ -481,6 +491,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         do { activateRoot(try FileSafety.root(url)) } catch { show(L("Cannot scan this folder","לא ניתן לסרוק את התיקייה"),error.localizedDescription);return }
         if mapMode { setMapMode(false) }
         let selectedRoot=root!;preferences.set(selectedRoot.path,forKey:"lastFolder");folderLabel.stringValue=selectedRoot.path;updateLocationHighlight()
+        if chatNamesSource != ChatDirectory.databaseURL(near:selectedRoot) { chatNames=[:];chatNamesSource=nil }
+        chatFilter.removeAllItems()
         primary.previewItem=nil;comparison.previewItem=nil;stopVideo();files=[];exact=[];similar=[];guards=[:];mode.selectItem(at:0);modeChanged()
         token=CancellationToken();let jobToken=token;setBusy(true);refreshEmptyState();status.stringValue=L("Scanning file metadata…","סורק שמות וגדלים…")
         work.async {
@@ -592,7 +604,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let cutoff=Calendar.current.date(byAdding:.month,value:-months,to:Date()) ?? .distantPast
         var candidates=mode.indexOfSelectedItem == 3 ? ReviewQuery.older(files,than:cutoff) : files
         chatFilter.isHidden = !files.contains{ ChatFolders.kind(of:$0.url) != nil }
-        if !chatFilter.isHidden, chatFilter.indexOfSelectedItem > 0 { candidates=ChatFolders.filter(candidates,kind:ChatKind.allCases[chatFilter.indexOfSelectedItem-1]) }
+        chatNamesButton?.isHidden = chatFilter.isHidden || chatNames.isEmpty == false || root.flatMap{ ChatDirectory.databaseURL(near:$0) } == nil
+        autoDownloadButton?.isHidden = chatFilter.isHidden
+        if chatFilter.numberOfItems <= 4 { rebuildChatFilter() }
+        if !chatFilter.isHidden {
+            if let identifier=chatFilter.selectedItem?.representedObject as? String { candidates=candidates.filter{ ChatDirectory.identifier(of:$0.url) == identifier } }
+            else if chatFilter.indexOfSelectedItem > 0 && chatFilter.indexOfSelectedItem <= ChatKind.allCases.count { candidates=ChatFolders.filter(candidates,kind:ChatKind.allCases[chatFilter.indexOfSelectedItem-1]) }
+        }
         shown=candidates.filter { f in
             f.allocatedBytes>=threshold[max(0,sizeFilter.indexOfSelectedItem)] && (query.isEmpty || f.url.path.lowercased().contains(query)) &&
             (kindFilter.indexOfSelectedItem==0 || f.kind == FileKind.allCases[kindFilter.indexOfSelectedItem-1]) && (members==nil || members!.contains(f.id))
@@ -600,6 +618,57 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         shown=ReviewQuery.sorted(shown,by:ReviewSort(rawValue:sortPicker.indexOfSelectedItem) ?? .largest)
         table.reloadData();table.selectRowIndexes(IndexSet(shown.indices.filter{old.contains(shown[$0].id)}),byExtendingSelection:false)
         updateSelection()
+    }
+    /// Kinds first, then every chat present in the scan, largest first, named when the chat list was loaded.
+    func rebuildChatFilter() {
+        let selected=chatFilter.selectedItem?.representedObject as? String ?? (chatFilter.indexOfSelectedItem > 0 && chatFilter.indexOfSelectedItem <= ChatKind.allCases.count ? "kind:\(chatFilter.indexOfSelectedItem)" : "")
+        var totals:[String:Int64]=[:]
+        for f in files { if let id=ChatDirectory.identifier(of:f.url) { totals[id,default:0] += f.allocatedBytes } }
+        chatFilter.removeAllItems();chatFilter.addItems(withTitles:[L("All chats","כל השיחות"),L("Group chats","קבוצות"),L("Personal chats","שיחות אישיות"),L("Status & broadcasts","סטטוס ותפוצה")])
+        guard !totals.isEmpty else { return }
+        chatFilter.menu?.addItem(.separator())
+        for (id,total) in totals.sorted(by:{ $0.value == $1.value ? $0.key < $1.key : $0.value > $1.value }).prefix(400) {
+            let item=NSMenuItem(title:(chatNames[id]?.name ?? id)+" · "+bytes(total),action:nil,keyEquivalent:"");item.representedObject=id
+            item.image=NSImage(systemSymbolName:chatNames[id]?.kind == .group || ChatFolders.kind(of:URL(fileURLWithPath:"/"+id+"/x")) == .group ? "person.3" : "person",accessibilityDescription:nil)
+            chatFilter.menu?.addItem(item)
+        }
+        if let index=chatFilter.itemArray.firstIndex(where:{ ($0.representedObject as? String) == selected }) { chatFilter.selectItem(at:index) }
+        else if selected.hasPrefix("kind:"), let k=Int(selected.dropFirst(5)) { chatFilter.selectItem(at:k) } else { chatFilter.selectItem(at:0) }
+    }
+    @objc func loadChatNamesFromButton() { loadChatNames(confirmed:false) }
+    /// WhatsApp for Mac has no public deep link to a settings pane, so this opens the app and spells out the path.
+    @objc func openWhatsAppAutoDownload() {
+        let steps=L("In WhatsApp: Settings (⌘,) › Storage (or Storage and Data) › Media auto-download. Turn off Photos, Audio, Videos and Documents you do not want downloaded automatically. Exact names vary by WhatsApp version.","בווטסאפ: Settings (⌘,) ‹ Storage (או Storage and Data) ‹ Media auto-download. כבה תמונות, שמע, וידאו ומסמכים שאינך רוצה שיירדו אוטומטית. השמות המדויקים משתנים בין גרסאות ווטסאפ.")
+        guard !smokeMode else { status.stringValue=steps;return }
+        let a=NSAlert();a.messageText=L("Stop WhatsApp auto-download","עצירת הורדה אוטומטית בווטסאפ");a.informativeText=steps
+        a.addButton(withTitle:L("Open WhatsApp","פתח את ווטסאפ"));a.addButton(withTitle:L("Close","סגור"))
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        if let app=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"net.whatsapp.WhatsApp") {
+            NSWorkspace.shared.openApplication(at:app,configuration:NSWorkspace.OpenConfiguration()){ _,error in if let error=error { DispatchQueue.main.async{ self.show(L("Cannot open WhatsApp","לא ניתן לפתוח את ווטסאפ"),error.localizedDescription) } } }
+        } else { show(L("WhatsApp not found","ווטסאפ לא נמצא"),L("WhatsApp for Mac is not installed here. Change the setting in WhatsApp on the device you use.","ווטסאפ למק לא מותקן כאן. שנה את ההגדרה בווטסאפ במכשיר שבו אתה משתמש.")) }
+    }
+    /// Explicit, read-only read of WhatsApp's chat list (identifier, name, type). Never messages; nothing is stored.
+    func loadChatNames(confirmed:Bool) {
+        guard !busy, let root=root, let database=ChatDirectory.databaseURL(near:root) else { return }
+        if !confirmed && !smokeMode {
+            let a=NSAlert();a.messageText=L("Show chat names?","להציג שמות שיחות?")
+            a.informativeText=L("Keepelix will open WhatsApp's local chat list read-only and read only each chat's identifier, display name and type, to label folders. Messages, contacts and media references are not read. Nothing is stored or sent anywhere. Close WhatsApp first if it reports the list as busy.","Keepelix תפתח את רשימת השיחות המקומית של ווטסאפ לקריאה בלבד ותקרא רק מזהה, שם תצוגה וסוג של כל שיחה, כדי לתייג תיקיות. הודעות, אנשי קשר והפניות למדיה לא נקראים. שום דבר לא נשמר ולא נשלח. אם הרשימה מדווחת כתפוסה, סגור את ווטסאפ קודם.")
+            a.addButton(withTitle:L("Show names","הצג שמות"));a.addButton(withTitle:L("Cancel","בטל"))
+            guard a.runModal() == .alertFirstButtonReturn else { return }
+        }
+        setBusy(true);cancelButton.isEnabled=false;status.stringValue=L("Reading chat list…","קורא רשימת שיחות…")
+        work.async {
+            let result=Result{ try ChatDirectory.load(from:database) }
+            DispatchQueue.main.async {
+                self.setBusy(false)
+                switch result {
+                case .success(let chats):
+                    self.chatNames=chats;self.chatNamesSource=database;self.chatNamesButton.isHidden=true;self.mapPanel.chatNames=chats;self.rebuildChatFilter();self.applyFilters()
+                    self.status.stringValue="\(chats.count) "+L("chats named · read-only, nothing stored","שיחות עם שם · לקריאה בלבד, לא נשמר")
+                case .failure(let error): self.show(L("Chat names unavailable","שמות שיחות אינם זמינים"),error.localizedDescription)
+                }
+            }
+        }
     }
     @objc func showOlderFiles() { guard !busy,root != nil else{return};if mapMode {setMapMode(false)};mode.selectItem(at:3);modeChanged();window.makeFirstResponder(table) }
     @objc func changeSort() {
@@ -908,6 +977,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             let chatFile=temp.appendingPathComponent("Media/12036301@g.us/clip.txt");try FileManager.default.createDirectory(at:chatFile.deletingLastPathComponent(),withIntermediateDirectories:true);try Data("g".utf8).write(to:chatFile)
             files.append(try FileRecord(url:chatFile));applyFilters();precondition(!chatFilter.isHidden,"Chat filter appears only when chat folders exist")
             chatFilter.selectItem(at:1);applyFilters();precondition(shown.count == 1 && shown[0].url.lastPathComponent == "clip.txt");chatFilter.selectItem(at:2);applyFilters();precondition(shown.isEmpty)
+            precondition(chatFilter.itemArray.contains{ ($0.representedObject as? String) == "12036301@g.us" } && chatNamesButton.isHidden,"Chats are listed by identifier; names need a database")
+            precondition(!autoDownloadButton.isHidden);openWhatsAppAutoDownload();precondition(status.stringValue.contains("auto-download") || status.stringValue.contains("אוטומטית"))
+            var db:OpaquePointer?;precondition(sqlite3_open(temp.appendingPathComponent(ChatDirectory.databaseName).path,&db) == SQLITE_OK)
+            precondition(sqlite3_exec(db,"CREATE TABLE ZWACHATSESSION (Z_PK INTEGER PRIMARY KEY, ZCONTACTJID TEXT, ZPARTNERNAME TEXT); INSERT INTO ZWACHATSESSION (ZCONTACTJID, ZPARTNERNAME) VALUES ('12036301@g.us','Synthetic hiking group')",nil,nil,nil) == SQLITE_OK);sqlite3_close(db)
+            applyFilters();precondition(!chatNamesButton.isHidden,"Offer names once a chat list is found");loadChatNames(confirmed:true);settle()
+            precondition(chatNames["12036301@g.us"]?.name == "Synthetic hiking group" && chatNamesButton.isHidden)
+            let named=chatFilter.itemArray.firstIndex{ $0.title.hasPrefix("Synthetic hiking group") }!;chatFilter.selectItem(at:named);applyFilters();precondition(shown.count == 1 && shown[0].url.lastPathComponent == "clip.txt","Filtering by a named chat")
+            try FileManager.default.removeItem(at:temp.appendingPathComponent(ChatDirectory.databaseName))
             chatFilter.selectItem(at:0);files.removeAll{$0.url == chatFile};try FileManager.default.removeItem(at:temp.appendingPathComponent("Media"));applyFilters();precondition(chatFilter.isHidden)
             table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false)
             precondition(!kindBadge.isHidden && kindBadge.stringValue.contains(Self.kindTitle(.document).uppercased()) && videoHost.isHidden,"Text files show a document badge and no player")

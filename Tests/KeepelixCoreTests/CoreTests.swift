@@ -4,6 +4,7 @@ import Darwin
 import CoreGraphics
 import ImageIO
 import UniformTypeIdentifiers
+import SQLite3
 @testable import KeepelixCore
 
 final class CoreTests: XCTestCase {
@@ -369,6 +370,33 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(ChatFolders.kind(of:group.url),.group);XCTAssertEqual(ChatFolders.kind(of:personal.url),.personal)
         XCTAssertEqual(ChatFolders.kind(of:lid.url),.personal);XCTAssertEqual(ChatFolders.kind(of:status.url),.broadcast);XCTAssertNil(ChatFolders.kind(of:plain.url))
         XCTAssertEqual(ChatFolders.filter([group,personal,lid,status,plain],kind:.personal).map(\.name),["pic.jpg","doc.pdf"])
+    }
+    func syntheticChatDatabase(at url:URL,rows:[(String,String)],schema:String="CREATE TABLE ZWACHATSESSION (Z_PK INTEGER PRIMARY KEY, ZCONTACTJID TEXT, ZPARTNERNAME TEXT, ZSESSIONTYPE INTEGER)")throws {
+        var db:OpaquePointer?;XCTAssertEqual(sqlite3_open(url.path,&db),SQLITE_OK);defer{sqlite3_close(db)}
+        XCTAssertEqual(sqlite3_exec(db,schema,nil,nil,nil),SQLITE_OK)
+        for (jid,name) in rows { XCTAssertEqual(sqlite3_exec(db,"INSERT INTO ZWACHATSESSION (ZCONTACTJID, ZPARTNERNAME) VALUES ('\(jid)', '\(name.replacingOccurrences(of:"'",with:"''"))')",nil,nil,nil),SQLITE_OK) }
+    }
+    func testChatDirectoryReadsNamesFromSyntheticDatabaseOnly()throws {
+        let container=root.appendingPathComponent("Container");let media=container.appendingPathComponent("Message/Media",isDirectory:true)
+        try FileManager.default.createDirectory(at:media.appendingPathComponent("120363@g.us"),withIntermediateDirectories:true)
+        try syntheticChatDatabase(at:container.appendingPathComponent(ChatDirectory.databaseName),rows:[("120363@G.US","Family trip"),("972500000000@s.whatsapp.net","Dana"),("status@broadcast",""),("unknown-thing","x")])
+        XCTAssertEqual(ChatDirectory.databaseURL(near:media.appendingPathComponent("120363@g.us"))?.lastPathComponent,ChatDirectory.databaseName)
+        XCTAssertNil(ChatDirectory.databaseURL(near:base))
+        let chats=try ChatDirectory.load(from:container.appendingPathComponent(ChatDirectory.databaseName))
+        XCTAssertEqual(chats["120363@g.us"],ChatInfo(identifier:"120363@g.us",name:"Family trip",kind:.group))
+        XCTAssertEqual(chats["972500000000@s.whatsapp.net"]?.name,"Dana");XCTAssertEqual(chats["status@broadcast"]?.name,"status@broadcast");XCTAssertNil(chats["unknown-thing"])
+        let file=try self.file("Container/Message/Media/120363@g.us/Video/clip.mp4")
+        XCTAssertEqual(ChatDirectory.identifier(of:file.url),"120363@g.us");XCTAssertNil(ChatDirectory.identifier(of:root.appendingPathComponent("plain.txt")))
+        // Read-only: the database bytes are unchanged and no write-ahead files appear.
+        let before=try Data(contentsOf:container.appendingPathComponent(ChatDirectory.databaseName));_=try ChatDirectory.load(from:container.appendingPathComponent(ChatDirectory.databaseName))
+        XCTAssertEqual(try Data(contentsOf:container.appendingPathComponent(ChatDirectory.databaseName)),before)
+        XCTAssertFalse(FileManager.default.fileExists(atPath:container.appendingPathComponent(ChatDirectory.databaseName+"-wal").path))
+    }
+    func testChatDirectoryRejectsUnknownSchemaAndMissingFile()throws {
+        let db=root.appendingPathComponent(ChatDirectory.databaseName)
+        try syntheticChatDatabase(at:db,rows:[],schema:"CREATE TABLE ZWACHATSESSION (Z_PK INTEGER PRIMARY KEY, ZSOMETHING TEXT)")
+        XCTAssertThrowsError(try ChatDirectory.load(from:db)) { XCTAssertEqual($0 as? ChatDirectoryError,.unexpectedSchema) }
+        XCTAssertThrowsError(try ChatDirectory.load(from:root.appendingPathComponent("missing.sqlite")))
     }
     func testStorageMapRejectsMissingRootsAndFiles()throws {
         XCTAssertThrowsError(try StorageMapper.map(root:root.appendingPathComponent("missing"),token:CancellationToken()))

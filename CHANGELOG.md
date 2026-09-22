@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-beta.6
+
+- Chat filter lists every WhatsApp chat found in the scan, largest first, by identifier.
+- **Stop auto-download…** opens WhatsApp and shows the path to its media auto-download setting (no public deep link exists).
+- **Chat names…**: explicit, read-only read of WhatsApp's local chat list (identifier, display name, type only) to label groups and contacts in the filter and the storage map. Messages are never read; nothing is stored. Synthetic-database tests prove the file is left untouched.
+
 ## 0.1.0-beta.5
 
 - Show the selected file's path (home folder as ~) next to the selection controls, and the folder path in the storage map details.

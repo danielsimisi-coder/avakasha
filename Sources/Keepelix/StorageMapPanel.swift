@@ -65,6 +65,8 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
     var onReview: ((URL) -> Void)?
     var onSelectionChange: (() -> Void)?
     var onReveal: ((URL) -> Void)?
+    /// Names loaded on request from WhatsApp's chat list; empty until the user asks.
+    var chatNames: [String: ChatInfo] = [:] { didSet { table.reloadData() } }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -204,7 +206,8 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         if node.isUnreadable { parts.append(L("Not accessible", "לא נגיש")) }
         else { parts.append("\(node.files) " + L("files", "קבצים") + (node.directories > 0 ? " · \(node.directories) " + L("folders", "תיקיות") : "")) }
         if node.isPackage { parts.append(L("Bundle", "חבילה")) }
-        switch ChatFolders.kind(of: node.url.appendingPathComponent("x")) { case .group?: parts.append(L("Group chat", "קבוצה")); case .personal?: parts.append(L("Personal chat", "שיחה אישית")); case .broadcast?: parts.append(L("Status / broadcast", "סטטוס / תפוצה")); case nil: break }
+        let chatLabel: String? = { switch ChatFolders.kind(of: node.url.appendingPathComponent("x")) { case .group?: return L("Group chat", "קבוצה"); case .personal?: return L("Personal chat", "שיחה אישית"); case .broadcast?: return L("Status / broadcast", "סטטוס / תפוצה"); case nil: return nil } }()
+        if let label = chatLabel { parts.append(chatNames[node.name.lowercased()].map { label + ": " + $0.name } ?? label) }
         if node.isHidden { parts.append(L("Hidden", "מוסתר")) }
         if !node.isUnreadable && node.inaccessible > 0 { parts.append("\(node.inaccessible) " + L("not accessible", "לא נגישים")) }
         if node.notDownloaded > 0 { parts.append("\(node.notDownloaded) " + L("not downloaded", "לא הורדו")) }

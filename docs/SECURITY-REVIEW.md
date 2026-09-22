@@ -19,6 +19,10 @@ This is a private beta, not a certification of zero vulnerabilities. Path-based 
 
 Developer ID signing, Apple notarization, clean-Mac Gatekeeper testing, Intel runtime testing and broader permission/filesystem/accessibility acceptance remain necessary before a supported public release. External GLM review was not used; a full Coverloop external-review pass is not claimed.
 
+## Beta 6 note
+
+Chat names are an explicit opt-in read of WhatsApp's local chat list through the system SQLite library, opened read-only (immutable fallback), one table, identifier/name/type columns only, verified on a synthetic database to leave the file byte-identical. This is a deliberate, documented exception to "no app databases are read"; the exact-duplicate scanner still skips `.sqlite` files and no other database is opened.
+
 ## Beta 3 focused review
 
 An independent adversarial pass (separate Claude context, read-only on the repository, synthetic fixtures only, no external providers) reviewed the storage map walker, the blocked-restore history and the map-mode isolation in the interface. Findings and disposition:
