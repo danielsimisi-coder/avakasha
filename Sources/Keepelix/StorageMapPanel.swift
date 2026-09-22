@@ -204,6 +204,7 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         if node.isUnreadable { parts.append(L("Not accessible", "לא נגיש")) }
         else { parts.append("\(node.files) " + L("files", "קבצים") + (node.directories > 0 ? " · \(node.directories) " + L("folders", "תיקיות") : "")) }
         if node.isPackage { parts.append(L("Bundle", "חבילה")) }
+        switch ChatFolders.kind(of: node.url.appendingPathComponent("x")) { case .group?: parts.append(L("Group chat", "קבוצה")); case .personal?: parts.append(L("Personal chat", "שיחה אישית")); case .broadcast?: parts.append(L("Status / broadcast", "סטטוס / תפוצה")); case nil: break }
         if node.isHidden { parts.append(L("Hidden", "מוסתר")) }
         if !node.isUnreadable && node.inaccessible > 0 { parts.append("\(node.inaccessible) " + L("not accessible", "לא נגישים")) }
         if node.notDownloaded > 0 { parts.append("\(node.notDownloaded) " + L("not downloaded", "לא הורדו")) }

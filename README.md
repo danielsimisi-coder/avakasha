@@ -61,7 +61,8 @@ The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
 | Type badge (image size, video length), path and "item N of M" for the selection | Loaded location highlighted in the sidebar | Delete does nothing in the map |
 | Command/Shift multi-selection | Select extra copies while keeping one | Undo and redo batches during this session |
 | Filter by name, type and size | Opt-in, local similar-image suggestions | Changed-file and path checks before each move |
-| Right-click to reveal the original in Finder | Hidden, protected and bundle folders are labelled in the map | Progress, cancellation and per-file errors |
+| Right-click to reveal the original in Finder; drag rows out to Finder, WhatsApp or any window (copies) | Hidden, protected and bundle folders are labelled in the map | Progress, cancellation and per-file errors |
+| WhatsApp media filter: group chats, personal chats, status (by folder name only) | | |
 | Explicit resume of your last folder and position | Hard links are not treated as extra copies | No private file inventory in the app bundle |
 
 ## Try the beta
@@ -90,6 +91,14 @@ The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
 | Right-click | Reveal the clicked original in Finder |
 | `Return` or `⌘↓` (map) | Open the selected folder in the storage map |
 | `⌘↑` (map) | Go up one folder in the storage map |
+
+## WhatsApp: groups and personal chats
+
+WhatsApp for Mac keeps each chat's media in a folder named after the chat identifier. When such folders are in the scanned location, a **chat filter** appears: group chats, personal chats, or status and broadcasts. This uses only the folder names. Keepelix never reads the chat database, so contact and group names are not available; the folder identifier is what you see. The storage map labels these folders the same way.
+
+## Drag files out
+
+Drag one or more highlighted rows to a Finder window, a WhatsApp conversation or any app that accepts files. The drag hands over the file location as a copy; Keepelix does not move or delete anything through a drag.
 
 ## Exact is different from similar
 

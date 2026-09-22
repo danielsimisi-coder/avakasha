@@ -52,6 +52,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     let mode = NSPopUpButton()
     let groupPicker = NSPopUpButton()
     let agePicker = NSPopUpButton()
+    let chatFilter = NSPopUpButton()
     let sortPicker = NSPopUpButton()
     let ageHint = NSTextField(labelWithString:L("Based on last modification — age alone does not mean a file is unused.","לפי השינוי האחרון — גיל הקובץ לא מעיד בהכרח שלא השתמשת בו."))
     let status = NSTextField(labelWithString: "")
@@ -163,7 +164,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         sizeFilter.setAccessibilityLabel(L("Minimum size","גודל מינימלי"));kindFilter.setAccessibilityLabel(L("File type","סוג קובץ"));sortPicker.setAccessibilityLabel(L("Sort order","סדר מיון"))
         mode.setAccessibilityLabel(L("Review view","תצוגת סקירה"));groupPicker.setAccessibilityLabel(L("Duplicate group","קבוצת כפילויות"));agePicker.setAccessibilityLabel(L("Age filter","סינון לפי גיל"));table.setAccessibilityLabel(L("Files","קבצים"))
         sortPicker.addItems(withTitles:[L("Largest first","הגדולים תחילה"),L("Smallest first","הקטנים תחילה"),L("Oldest first","הישנים תחילה"),L("Newest first","החדשים תחילה"),L("Name A–Z","שם א–ת"),L("Name Z–A","שם ת–א")]);sortPicker.target=self;sortPicker.action = #selector(changeSort);sortPicker.font = .systemFont(ofSize:12)
-        let filters=row([search,sizeFilter,kindFilter,sortPicker]);search.setContentHuggingPriority(.init(1),for:.horizontal)
+        chatFilter.addItems(withTitles:[L("All chats","כל השיחות"),L("Group chats","קבוצות"),L("Personal chats","שיחות אישיות"),L("Status & broadcasts","סטטוס ותפוצה")]);chatFilter.target=self;chatFilter.action = #selector(applyFilters);chatFilter.font = .systemFont(ofSize:12);chatFilter.isHidden=true
+        chatFilter.setAccessibilityLabel(L("Chat type","סוג שיחה"));chatFilter.toolTip=L("By WhatsApp's per-chat folder names only. Chat databases are not read, so contact and group names are not shown.","לפי שמות תיקיות השיחה של ווטסאפ בלבד. מסד השיחות לא נקרא, ולכן שמות אנשי קשר וקבוצות אינם מוצגים.")
+        let filters=row([search,sizeFilter,kindFilter,chatFilter,sortPicker]);search.setContentHuggingPriority(.init(1),for:.horizontal)
         mode.addItems(withTitles:[L("All files","כל הקבצים"),L("Exact duplicates","כפילויות זהות"),L("Similar images","תמונות דומות"),L("Older files","קבצים ישנים")]);mode.target=self;mode.action = #selector(modeChanged)
         groupPicker.target=self;groupPicker.action = #selector(applyFilters)
         let exactButton=button("Find duplicates","מצא כפילויות","square.on.square",#selector(findExactDuplicates))
@@ -173,6 +176,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let analysis=row([mode,groupPicker,agePicker,spacer(),exactButton,similarButton])
         scroll=NSScrollView();scroll.hasVerticalScroller=true;scroll.hasHorizontalScroller=true;scroll.autohidesScrollers=true
         table.frame=NSRect(x:0,y:0,width:540,height:440);table.autoresizingMask=[.width];table.owner=self;table.delegate=self;table.dataSource=self
+        table.setDraggingSourceOperationMask(.copy,forLocal:false) // dragging out copies; Keepelix never moves files without confirmation
         table.allowsMultipleSelection=true;table.rowHeight=38;table.intercellSpacing=NSSize(width:12,height:4);table.usesAlternatingRowBackgroundColors=false;table.style = .inset;table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         for (id,title,width) in [("name",L("Name","שם"),240.0),("size",L("On disk","בדיסק"),80.0),("modified",L("Last modified","שינוי אחרון"),100.0)] {
             let c=NSTableColumn(identifier:NSUserInterfaceItemIdentifier(id));c.title=title;c.width=width;c.sortDescriptorPrototype=NSSortDescriptor(key:id,ascending:id != "size");table.addTableColumn(c)
@@ -459,7 +463,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             if demoMode && (b.action == #selector(trashSelection) || b.action == #selector(undoTrash) || b.action == #selector(redoTrash)) { b.isEnabled=false }
             if b.action == #selector(resumeFolder) { b.isEnabled = !busy && preferences.string(forKey:"lastFolder") != nil }
         }; cancelButton?.isEnabled=busy
-        [sizeFilter,kindFilter,mode,groupPicker,agePicker,sortPicker].forEach{$0.isEnabled = !busy};search.isEnabled = !busy
+        [sizeFilter,kindFilter,mode,groupPicker,agePicker,sortPicker,chatFilter].forEach{$0.isEnabled = !busy};search.isEnabled = !busy
         undoButton?.isEnabled = !busy && !demoMode && !mapMode && history.canUndo
         redoButton?.isEnabled = !busy && !demoMode && !mapMode && history.canRedo
         if !busy { retryButton?.isHidden = history.blockedCount == 0 } // history is only touched by the work queue while busy
@@ -586,7 +590,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let query=search.stringValue.lowercased()
         let months=[6,12,24,60][max(0,agePicker.indexOfSelectedItem)]
         let cutoff=Calendar.current.date(byAdding:.month,value:-months,to:Date()) ?? .distantPast
-        let candidates=mode.indexOfSelectedItem == 3 ? ReviewQuery.older(files,than:cutoff) : files
+        var candidates=mode.indexOfSelectedItem == 3 ? ReviewQuery.older(files,than:cutoff) : files
+        chatFilter.isHidden = !files.contains{ ChatFolders.kind(of:$0.url) != nil }
+        if !chatFilter.isHidden, chatFilter.indexOfSelectedItem > 0 { candidates=ChatFolders.filter(candidates,kind:ChatKind.allCases[chatFilter.indexOfSelectedItem-1]) }
         shown=candidates.filter { f in
             f.allocatedBytes>=threshold[max(0,sizeFilter.indexOfSelectedItem)] && (query.isEmpty || f.url.path.lowercased().contains(query)) &&
             (kindFilter.indexOfSelectedItem==0 || f.kind == FileKind.allCases[kindFilter.indexOfSelectedItem-1]) && (members==nil || members!.contains(f.id))
@@ -641,6 +647,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let cell=NSStackView(views:[icon,v]);cell.spacing=9;cell.toolTip=f.url.path;return cell
     }
     func tableViewSelectionDidChange(_ notification:Notification){trackFocus();updateSelection()}
+    /// Drag one or more rows to Finder, WhatsApp or any other window as file URLs.
+    func tableView(_ tableView:NSTableView,pasteboardWriterForRow row:Int)->NSPasteboardWriting? {
+        guard !busy,!mapMode,row<shown.count,let root=root,(try? FileSafety.validate(shown[row],root:root)) != nil else { return nil }
+        return shown[row].url as NSURL
+    }
+    func tableView(_ tableView:NSTableView,draggingSession session:NSDraggingSession,willBeginAt screenPoint:NSPoint,forRowIndexes rowIndexes:IndexSet) { session.draggingFormation = .stack }
     func updateSelection(){
         let chosen=selectedFiles
         if chosen.isEmpty { selectionLabel.stringValue="\(shown.count) " + L("items","פריטים") }
@@ -891,6 +903,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(previewOpen && primary.previewItem != nil,"The preview is open by default");togglePreview();precondition(primary.previewItem == nil)
             togglePreview();precondition(primary.previewItem != nil)
             precondition(pathLabel.stringValue == displayPath(selectedFiles[0].url) && pathLabel.toolTip == selectedFiles[0].url.path,"The selected file's path must be shown")
+            precondition((tableView(table,pasteboardWriterForRow:0) as? NSURL)?.path == shown[0].url.path,"Rows drag out as file URLs")
+            precondition(tableView(table,pasteboardWriterForRow:99) == nil && chatFilter.isHidden)
+            let chatFile=temp.appendingPathComponent("Media/12036301@g.us/clip.txt");try FileManager.default.createDirectory(at:chatFile.deletingLastPathComponent(),withIntermediateDirectories:true);try Data("g".utf8).write(to:chatFile)
+            files.append(try FileRecord(url:chatFile));applyFilters();precondition(!chatFilter.isHidden,"Chat filter appears only when chat folders exist")
+            chatFilter.selectItem(at:1);applyFilters();precondition(shown.count == 1 && shown[0].url.lastPathComponent == "clip.txt");chatFilter.selectItem(at:2);applyFilters();precondition(shown.isEmpty)
+            chatFilter.selectItem(at:0);files.removeAll{$0.url == chatFile};try FileManager.default.removeItem(at:temp.appendingPathComponent("Media"));applyFilters();precondition(chatFilter.isHidden)
+            table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false)
             precondition(!kindBadge.isHidden && kindBadge.stringValue.contains(Self.kindTitle(.document).uppercased()) && videoHost.isHidden,"Text files show a document badge and no player")
             precondition(selectionLabel.stringValue.hasPrefix(L("Item ","פריט ")+"1"+L(" of ","  מתוך ")+"\(shown.count)"),"Position counter: \(selectionLabel.stringValue)")
             let clip=temp.appendingPathComponent("Synthetic clip.mov");try Self.writeSyntheticVideo(to:clip);files.append(try FileRecord(url:clip));applyFilters()

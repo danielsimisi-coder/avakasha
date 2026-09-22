@@ -361,6 +361,15 @@ final class CoreTests: XCTestCase {
         XCTAssertTrue(history.retryBlocked(backend:backend)!.restored.isEmpty);XCTAssertEqual(history.blockedCount,1)
         XCTAssertEqual(try String(contentsOf:moved.tickets[0].trashed),"tampered","The ticket and its Trash item are kept")
     }
+    func testChatFoldersClassifyByFolderNameOnly()throws {
+        let group=try file("Message/Media/120363012345678901@g.us/Video/clip.mp4")
+        let personal=try file("Message/Media/972500000000@s.whatsapp.net/Image/pic.jpg")
+        let lid=try file("Message/Media/123456789@lid/doc.pdf");let status=try file("Message/Media/status@broadcast/a.jpg")
+        let plain=try file("Downloads/notes@g.us.txt") // a file name is never a chat folder
+        XCTAssertEqual(ChatFolders.kind(of:group.url),.group);XCTAssertEqual(ChatFolders.kind(of:personal.url),.personal)
+        XCTAssertEqual(ChatFolders.kind(of:lid.url),.personal);XCTAssertEqual(ChatFolders.kind(of:status.url),.broadcast);XCTAssertNil(ChatFolders.kind(of:plain.url))
+        XCTAssertEqual(ChatFolders.filter([group,personal,lid,status,plain],kind:.personal).map(\.name),["pic.jpg","doc.pdf"])
+    }
     func testStorageMapRejectsMissingRootsAndFiles()throws {
         XCTAssertThrowsError(try StorageMapper.map(root:root.appendingPathComponent("missing"),token:CancellationToken()))
         let f=try file("x.txt");XCTAssertThrowsError(try StorageMapper.map(root:f.url,token:CancellationToken()))
