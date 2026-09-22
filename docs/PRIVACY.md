@@ -3,6 +3,7 @@
 Keepelix has no networking client, analytics, account system, advertising SDK or automatic updater. It never uploads files or directory listings. Quick Look previews are provided by macOS and the preview extensions installed on your Mac.
 
 - **Inventory:** reads file names, locations, sizes, types and filesystem identity inside the chosen folder. No folder is scanned before you choose one or press Resume.
+- **Storage map:** reads folder and file names, allocated sizes and filesystem flags below the folder or drive you choose. It never reads file contents, never follows symbolic links and never enters other volumes. Nothing is stored after the session.
 - **Exact duplicates:** reads file bytes locally to calculate SHA-256. It does not read app databases or chat history.
 - **Similar images:** explicitly opt-in. Decodes images locally into tiny comparison thumbnails. Similarity is not a deletion recommendation.
 - **Preview:** reads only the selected file and, in duplicate views, a comparison file from the same group.

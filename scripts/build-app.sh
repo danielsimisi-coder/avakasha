@@ -1,9 +1,10 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-version="${VERSION:-0.1.0-beta.2}"
+version="${VERSION:-0.1.0-beta.3}"
 build_root="${BUILD_ROOT:-.build/distribution}"
-mkdir -p "$build_root" dist
+dist_dir="${DIST_DIR:-dist}"
+mkdir -p "$build_root" "$dist_dir"
 for arch in arm64 x86_64; do
   swift build -c release --arch "$arch" --scratch-path "$build_root/$arch" -Xswiftc -debug-prefix-map -Xswiftc "$PWD=."
 done
@@ -23,7 +24,7 @@ strip -S "$app/Contents/MacOS/Keepelix"
 /usr/libexec/PlistBuddy -c 'Add :CFBundleName string Keepelix' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :CFBundlePackageType string APPL' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string ${version%%-*}" "$app/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c 'Add :CFBundleVersion string 2' "$app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleVersion string 3' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :LSMinimumSystemVersion string 13.0' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :NSHighResolutionCapable bool true' "$app/Contents/Info.plist"
 if [ -f assets/AppIcon.icns ]; then
@@ -31,6 +32,8 @@ if [ -f assets/AppIcon.icns ]; then
   /usr/libexec/PlistBuddy -c 'Add :CFBundleIconFile string AppIcon' "$app/Contents/Info.plist"
 fi
 if [ -n "${SIGN_IDENTITY:-}" ]; then
+  security find-identity -v -p codesigning | grep -Fq "$SIGN_IDENTITY" || { echo "SIGN_IDENTITY not found in the keychain: $SIGN_IDENTITY"; exit 1; }
+  case "$SIGN_IDENTITY" in "Developer ID Application:"*) ;; *) echo "WARNING: $SIGN_IDENTITY is not a Developer ID Application identity; Gatekeeper on other Macs will not accept it and notarization will be refused." ;; esac
   codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$app"
 else
   codesign --force --sign - "$app"
@@ -38,7 +41,7 @@ else
 fi
 codesign --verify --strict "$app"
 "$app/Contents/MacOS/Keepelix" --launch-check
-archive="dist/Keepelix-$version-universal.zip"
+archive="$dist_dir/Keepelix-$version-universal.zip"
 ditto --norsrc --noextattr -c -k --keepParent "$app" "$archive"
 if [ -n "${NOTARY_PROFILE:-}" ]; then
   test -n "${SIGN_IDENTITY:-}" || { echo 'NOTARY_PROFILE requires SIGN_IDENTITY'; exit 1; }
@@ -47,5 +50,5 @@ if [ -n "${NOTARY_PROFILE:-}" ]; then
   xcrun stapler validate "$app"
   ditto --norsrc --noextattr -c -k --keepParent "$app" "$archive"
 fi
-(cd dist && shasum -a 256 "$(basename "$archive")") > "$archive.sha256"
+(cd "$dist_dir" && shasum -a 256 "$(basename "$archive")") > "$archive.sha256"
 echo "$archive"

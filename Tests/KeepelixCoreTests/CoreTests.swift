@@ -191,7 +191,7 @@ final class CoreTests: XCTestCase {
         _=history.move([a,b],root:root,backend:backend)
         try Data("keep this new file".utf8).write(to:b.url)
         XCTAssertEqual(history.undo(backend:backend)?.restored,[a.url])
-        XCTAssertTrue(history.canUndo);XCTAssertTrue(history.canRedo)
+        XCTAssertFalse(history.canUndo,"The conflicting item waits for retry instead of blocking Undo");XCTAssertEqual(history.blockedCount,1);XCTAssertTrue(history.canRedo)
         XCTAssertEqual(history.redo(backend:backend)?.tickets.map{ $0.original },[a.url])
         XCTAssertEqual(try String(contentsOf:b.url),"keep this new file")
     }
@@ -225,5 +225,148 @@ final class CoreTests: XCTestCase {
     func testMalformedImageIsSkipped()throws{
         let bad=try file("bad.jpg","not an image")
         let result=try SimilarImages.find([bad],root:root,token:CancellationToken());XCTAssertTrue(result.groups.isEmpty);XCTAssertEqual(result.skipped,1)
+    }
+
+    // MARK: Blocked restores
+    func testBlockedRestoreDoesNotBlockEarlierBatches()throws {
+        let a=try file("a.txt"),b=try file("b.txt"),history=TrashHistory(),backend=FakeTrash(directory:trash)
+        _=history.move([a],root:root,backend:backend);_=history.move([b],root:root,backend:backend)
+        try Data("new b".utf8).write(to:b.url) // a different file now occupies b's original path
+        let first=history.undo(backend:backend)!
+        XCTAssertEqual(first.pending.count,1);XCTAssertEqual(history.blockedCount,1)
+        XCTAssertTrue(history.canUndo,"The earlier batch must stay reachable")
+        XCTAssertEqual(history.undo(backend:backend)?.restored,[a.url])
+        XCTAssertFalse(history.canUndo);XCTAssertEqual(history.blockedCount,1)
+        XCTAssertEqual(try String(contentsOf:b.url),"new b")
+        let stillBlocked=history.retryBlocked(backend:backend)!
+        XCTAssertTrue(stillBlocked.restored.isEmpty);XCTAssertEqual(stillBlocked.failures.count,1);XCTAssertEqual(history.blockedCount,1)
+        XCTAssertEqual(try String(contentsOf:b.url),"new b","Retry must never overwrite")
+        try FileManager.default.removeItem(at:b.url)
+        let resolved=history.retryBlocked(backend:backend)!
+        XCTAssertEqual(resolved.restored,[b.url]);XCTAssertEqual(history.blockedCount,0);XCTAssertNil(history.retryBlocked(backend:backend))
+        XCTAssertEqual(try String(contentsOf:b.url),"test")
+        XCTAssertTrue(history.canRedo);XCTAssertEqual(history.redo(backend:backend)?.tickets.map{$0.original},[b.url])
+    }
+    func testNewMoveKeepsBlockedRestoresAndListsTrashLocations()throws {
+        let a=try file("a.txt"),c=try file("c.txt"),history=TrashHistory(),backend=FakeTrash(directory:trash)
+        let moved=history.move([a],root:root,backend:backend)
+        try Data("occupied".utf8).write(to:a.url);_=history.undo(backend:backend)
+        XCTAssertEqual(history.blockedCount,1)
+        _=history.move([c],root:root,backend:backend)
+        XCTAssertEqual(history.blockedCount,1);XCTAssertFalse(history.canRedo)
+        XCTAssertEqual(history.blockedItems.map{$0.trashed},moved.tickets.map{$0.trashed})
+        XCTAssertTrue(FileManager.default.fileExists(atPath:moved.tickets[0].trashed.path))
+    }
+    func testRetryRejectsChangedTrashItem()throws {
+        let a=try file("a.txt"),history=TrashHistory(),backend=FakeTrash(directory:trash)
+        let moved=history.move([a],root:root,backend:backend)
+        try Data("occupied".utf8).write(to:a.url);_=history.undo(backend:backend)
+        try FileManager.default.removeItem(at:a.url)
+        try Data("tampered".utf8).write(to:moved.tickets[0].trashed)
+        XCTAssertTrue(history.retryBlocked(backend:backend)!.restored.isEmpty);XCTAssertEqual(history.blockedCount,1)
+        XCTAssertFalse(FileManager.default.fileExists(atPath:a.id))
+    }
+
+    // MARK: Storage map
+    func testStorageMapAggregatesFoldersAndDirectFiles()throws {
+        _=try file("big/video.mov",String(repeating:"v",count:20_000));_=try file("big/nested/clip.mov",String(repeating:"c",count:8_000))
+        _=try file("small/note.txt","hi");_=try file("loose.txt",String(repeating:"l",count:5_000))
+        let result=try StorageMapper.map(root:root,token:CancellationToken())
+        XCTAssertFalse(result.cancelled);let r=result.root
+        XCTAssertEqual(r.children.map(\.name),["big","small"],"Children sort by size")
+        let big=r.children[0]
+        XCTAssertEqual(big.files,2);XCTAssertEqual(big.directFiles,1);XCTAssertEqual(big.children.map(\.name),["nested"])
+        XCTAssertEqual(big.bytes,big.directBytes+big.children[0].bytes);XCTAssertGreaterThanOrEqual(big.bytes,28_000)
+        XCTAssertEqual(r.bytes,big.bytes+r.children[1].bytes+r.directBytes)
+        XCTAssertEqual(r.directFiles,1);XCTAssertEqual(r.files,4);XCTAssertEqual(r.directories,3)
+        XCTAssertEqual(big.children[0].trail.map(\.name),[r.name,"big","nested"]);XCTAssertFalse(r.hasCaveats)
+    }
+    func testStorageMapCountsHardLinksOnceAndDoesNotFollowSymlinks()throws {
+        let a=try file("a.bin",String(repeating:"a",count:10_000))
+        try FileManager.default.linkItem(at:a.url,to:root.appendingPathComponent("a-link.bin"))
+        try FileManager.default.createSymbolicLink(at:root.appendingPathComponent("sym.bin"),withDestinationURL:a.url)
+        let outside=base.appendingPathComponent("outside");try FileManager.default.createDirectory(at:outside,withIntermediateDirectories:true)
+        try Data(String(repeating:"o",count:50_000).utf8).write(to:outside.appendingPathComponent("o.bin"))
+        try FileManager.default.createSymbolicLink(at:root.appendingPathComponent("outside-link"),withDestinationURL:outside)
+        let result=try StorageMapper.map(root:root,token:CancellationToken())
+        XCTAssertEqual(result.sharedFiles,1);XCTAssertEqual(result.root.files,2)
+        XCTAssertEqual(result.root.bytes,a.allocatedBytes,"Hard-linked data counts once; links add nothing")
+        XCTAssertTrue(result.root.children.isEmpty,"A symlinked folder is not entered")
+    }
+    func testStorageMapMeasuresPackagesWithoutOpeningThem()throws {
+        _=try file("Album.app/Contents/big.bin",String(repeating:"p",count:12_000));_=try file("Album.app/Contents/Resources/x.txt","x")
+        let result=try StorageMapper.map(root:root,token:CancellationToken())
+        let package=result.root.children[0]
+        XCTAssertTrue(package.isPackage);XCTAssertTrue(package.children.isEmpty)
+        XCTAssertEqual(package.files,2);XCTAssertGreaterThanOrEqual(package.bytes,12_000);XCTAssertEqual(result.root.bytes,package.bytes)
+    }
+    func testStorageMapReportsUnreadableAndHiddenFolders()throws {
+        _=try file(".cache/blob.bin",String(repeating:"h",count:4_000))
+        let locked=root.appendingPathComponent("locked");try FileManager.default.createDirectory(at:locked,withIntermediateDirectories:true)
+        try FileManager.default.setAttributes([.posixPermissions:0],ofItemAtPath:locked.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions:0o755],ofItemAtPath:locked.path) }
+        let result=try StorageMapper.map(root:root,token:CancellationToken())
+        XCTAssertEqual(result.root.inaccessible,1);XCTAssertTrue(result.root.hasCaveats)
+        let lockedNode=try XCTUnwrap(result.root.children.first{$0.name=="locked"})
+        XCTAssertTrue(lockedNode.isUnreadable);XCTAssertEqual(lockedNode.bytes,0)
+        XCTAssertTrue(try XCTUnwrap(result.root.children.first{$0.name==".cache"}).isHidden)
+    }
+    func testStorageMapCancelledReturnsConsistentPartialResult()throws {
+        for i in 0..<600 { _=try file("d\(i%20)/f\(i).txt","x") }
+        let token=CancellationToken();token.cancel()
+        let result=try StorageMapper.map(root:root,token:token)
+        XCTAssertTrue(result.cancelled);XCTAssertLessThan(result.root.files,600)
+        XCTAssertEqual(result.root.files,result.root.directFiles+result.root.children.reduce(0){$0+$1.files})
+        XCTAssertFalse(try StorageMapper.map(root:root,token:CancellationToken()).cancelled)
+    }
+    func testStorageMapSkippedFolderAtDepthTwoKeepsHierarchy()throws {
+        // fts re-reports a skipped directory as FTS_DP; the walker must not pop its parent early.
+        _=try file("a/one.bin",String(repeating:"1",count:5_000));_=try file("a/mnt/inside.bin",String(repeating:"m",count:50_000))
+        _=try file("a/two.bin",String(repeating:"2",count:5_000));_=try file("a/sub/g.bin",String(repeating:"g",count:5_000));_=try file("b/three.bin","3")
+        let mount=root.appendingPathComponent("a/mnt").path
+        let result=try StorageMapper.map(root:root,token:CancellationToken(),progress:{_,_ in},treatAsOtherVolume:{ $0 == mount })
+        let a=try XCTUnwrap(result.root.children.first{$0.name=="a"})
+        XCTAssertEqual(result.root.directFiles,0);XCTAssertEqual(result.root.children.map(\.name),["a","b"])
+        XCTAssertEqual(a.files,3);XCTAssertEqual(a.directFiles,2);XCTAssertEqual(a.directories,1);XCTAssertEqual(a.otherVolumes,1)
+        XCTAssertEqual(a.children.map(\.name),["sub"]);XCTAssertEqual(a.bytes,a.directBytes+a.children[0].bytes);XCTAssertLessThan(a.bytes,50_000)
+        XCTAssertEqual(result.root.bytes,a.bytes+result.root.children[1].bytes)
+    }
+    func testStorageMapNestedUnreadableFolderKeepsHierarchy()throws {
+        _=try file("a/one.bin","1");_=try file("a/after.bin","2");_=try file("b/x.bin","3")
+        let locked=root.appendingPathComponent("a/locked");try FileManager.default.createDirectory(at:locked,withIntermediateDirectories:true)
+        try FileManager.default.setAttributes([.posixPermissions:0],ofItemAtPath:locked.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions:0o755],ofItemAtPath:locked.path) }
+        let result=try StorageMapper.map(root:root,token:CancellationToken())
+        let a=try XCTUnwrap(result.root.children.first{$0.name=="a"})
+        XCTAssertEqual(result.root.directFiles,0);XCTAssertEqual(a.directFiles,2);XCTAssertEqual(a.inaccessible,1)
+        XCTAssertEqual(a.children.map(\.name),["locked"]);XCTAssertTrue(a.children[0].isUnreadable)
+        XCTAssertEqual(result.root.children.map(\.name).sorted(),["a","b"])
+    }
+    func testBlockedTicketWhoseTrashItemVanishedIsReportedNotStuck()throws {
+        let a=try file("a.txt"),history=TrashHistory(),backend=FakeTrash(directory:trash)
+        let moved=history.move([a],root:root,backend:backend)
+        try Data("occupied".utf8).write(to:a.url);_=history.undo(backend:backend)
+        XCTAssertEqual(history.blockedCount,1)
+        try FileManager.default.removeItem(at:moved.tickets[0].trashed) // restored in Finder or Trash emptied
+        let retry=history.retryBlocked(backend:backend)!
+        XCTAssertTrue(retry.restored.isEmpty);XCTAssertEqual(retry.failures.count,1);XCTAssertTrue(retry.failures[0].message.contains("no longer in Trash"))
+        XCTAssertEqual(history.blockedCount,0);XCTAssertNil(history.retryBlocked(backend:backend))
+        XCTAssertEqual(try String(contentsOf:a.url),"occupied")
+    }
+    func testRetryRejectsChangedTrashItemAndKeepsIt()throws {
+        let a=try file("a.txt"),history=TrashHistory(),backend=FakeTrash(directory:trash)
+        let moved=history.move([a],root:root,backend:backend)
+        try Data("occupied".utf8).write(to:a.url);_=history.undo(backend:backend);try FileManager.default.removeItem(at:a.url)
+        try Data("tampered".utf8).write(to:moved.tickets[0].trashed)
+        XCTAssertTrue(history.retryBlocked(backend:backend)!.restored.isEmpty);XCTAssertEqual(history.blockedCount,1)
+        XCTAssertEqual(try String(contentsOf:moved.tickets[0].trashed),"tampered","The ticket and its Trash item are kept")
+    }
+    func testStorageMapRejectsMissingRootsAndFiles()throws {
+        XCTAssertThrowsError(try StorageMapper.map(root:root.appendingPathComponent("missing"),token:CancellationToken()))
+        let f=try file("x.txt");XCTAssertThrowsError(try StorageMapper.map(root:f.url,token:CancellationToken()))
+        let sealed=root.appendingPathComponent("sealed");try FileManager.default.createDirectory(at:sealed,withIntermediateDirectories:true)
+        try FileManager.default.setAttributes([.posixPermissions:0],ofItemAtPath:sealed.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions:0o755],ofItemAtPath:sealed.path) }
+        XCTAssertThrowsError(try StorageMapper.map(root:sealed,token:CancellationToken())) { XCTAssertEqual($0 as? TriageError,.inaccessible) }
     }
 }

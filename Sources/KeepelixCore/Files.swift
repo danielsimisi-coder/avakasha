@@ -11,9 +11,10 @@ public final class CancellationToken {
 }
 
 public enum TriageError: Error, LocalizedError {
-    case cancelled, unsafePath, changed, notLocal, destinationExists, missingKeeper
+    case cancelled, unsafePath, changed, notLocal, destinationExists, missingKeeper, inaccessible
     public var errorDescription: String? {
         switch self {
+        case .inaccessible: return "This folder could not be read. Check its permissions or grant access in System Settings > Privacy & Security."
         case .cancelled: return "Operation cancelled."
         case .unsafePath: return "The file is outside the chosen folder, is a link, or is not a regular file."
         case .changed: return "The file changed since the scan. Scan again before moving it."

@@ -24,10 +24,19 @@ NOTARY_PROFILE='your-keychain-profile' \
 VERSION='0.1.0' ./scripts/build-app.sh
 ```
 
+Set `DIST_DIR` to write the archive somewhere other than `dist/`. The script refuses a `SIGN_IDENTITY` that is not in the keychain and warns when it is not a Developer ID Application identity: an Apple Development certificate can exercise the signing branch locally, but Gatekeeper on other Macs will not accept it and Apple will not notarize it.
+
 The profile must already be configured using Apple's `notarytool`. Never commit private keys, certificates or passwords. The script submits to Apple only when `NOTARY_PROFILE` is explicitly set. Review Apple's current Developer ID and notarization requirements before release.
 
 - https://developer.apple.com/developer-id/
 - https://developer.apple.com/documentation/security/notarizing-macos-software-before-distribution
+
+## Signing validation, 22 September 2026
+
+- The ad-hoc package builds, passes `codesign --verify --strict`, `--launch-check` inside the bundle and the release audit.
+- The signing branch was exercised locally with an **Apple Development** identity into a scratch `DIST_DIR`: hardened runtime and a trusted timestamp were applied and `codesign -dvv` shows the full certificate chain. `spctl --assess` rejects that build, as expected for a non-Developer-ID identity. Nothing signed this way is distributed.
+- No Developer ID Application identity and no `notarytool` keychain profile exist on the build Mac, so notarization was not attempted and is not claimed. The script path is ready; it only needs the identity and profile.
+- No Intel Mac, no clean Mac and no Gatekeeper acceptance test were available; these remain checklist items.
 
 ## Release checklist
 

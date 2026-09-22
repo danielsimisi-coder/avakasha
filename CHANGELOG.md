@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-beta.3
+
+- Add a storage map: measure any folder or drive, list folders largest first with share bars, open folders, and hand a folder to file review with one click. Read-only; Delete does nothing in the map.
+- Report what the map could not measure instead of guessing: not accessible, hidden, bundle, not downloaded and other-volume entries are labelled and counted; hard links count once; symbolic links are not followed; cancellation keeps consistent partial totals.
+- Blocked restores no longer block earlier batches. Items whose original path is taken stay in Trash under Retry restore; Undo continues to older batches; quitting with items waiting asks first.
+- Independent review fixes: skipped folders deeper than one level no longer corrupt the map hierarchy; Select All cannot reach the hidden file list from the map; a waiting restore whose Trash item vanished is reported once instead of waiting forever.
+- Localise remaining status and error messages in Hebrew, add accessibility labels to filters and tables, and show scanning/measuring empty states.
+- Fix the workspace not filling the window height.
+- Package as 0.1.0 beta 3; the build script checks that a signing identity exists and warns when it is not a Developer ID identity.
+
 ## 0.1.0-beta.2
 
 - Add Delete-to-Trash, optional confirmation suppression, and session Undo/Redo with keyboard shortcuts and buttons.

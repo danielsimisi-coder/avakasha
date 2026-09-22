@@ -29,10 +29,10 @@ final class FileTable: NSTableView {
 
 final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSWindowDelegate, NSMenuItemValidation {
     let smokeMode = ProcessInfo.processInfo.arguments.contains("--smoke-test")
-    let demoMode = ProcessInfo.processInfo.arguments.contains("--demo")
+    let demoMode = ProcessInfo.processInfo.arguments.contains("--demo") || ProcessInfo.processInfo.arguments.contains("--demo-map")
     var demoFolder: URL?
     let preferences: UserDefaults = {
-        if ProcessInfo.processInfo.arguments.contains("--demo") { return UserDefaults(suiteName:"Keepelix.SyntheticDemo")! }
+        if ProcessInfo.processInfo.arguments.contains("--demo") || ProcessInfo.processInfo.arguments.contains("--demo-map") { return UserDefaults(suiteName:"Keepelix.SyntheticDemo")! }
         if ProcessInfo.processInfo.arguments.contains("--smoke-test") {
             guard let isolated = UserDefaults(suiteName:"Keepelix.SyntheticSmoke") else { fatalError("Cannot create synthetic test preferences") }
             return isolated
@@ -81,10 +81,19 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     var trashBackend: TrashBackend = SystemTrash()
     var redoButton: NSButton!
     var confirmationMenuItem: NSMenuItem?
+    var mapMode = false
+    let mapPanel = StorageMapPanel()
+    var mapRoot: URL?
+    var reviewOnlyViews: [NSView] = []
+    var headingLabel: NSTextField!
+    var tips: NSTextField!
+    var retryButton: NSButton!
+    var mapButton: NSButton!
+    var scroll: NSScrollView!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         window = NSWindow(contentRect:NSRect(x:0,y:0,width:1320,height:820),styleMask:[.titled,.closable,.miniaturizable,.resizable],backing:.buffered,defer:false)
-        window.delegate=self; window.title="Keepelix · 0.1.0 beta 2"
+        window.delegate=self; window.title="Keepelix · 0.1.0 beta 3"
         window.minSize=NSSize(width:1120,height:720);window.center();window.titlebarAppearsTransparent=true
         func label(_ text:String,_ size:CGFloat,_ weight:NSFont.Weight = .regular,_ secondary:Bool = false)->NSTextField {
             let v=NSTextField(labelWithString:text);v.font = .systemFont(ofSize:size,weight:weight);v.textColor=secondary ? .secondaryLabelColor : .labelColor;return v
@@ -96,7 +105,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         }
         func row(_ views:[NSView],_ spacing:CGFloat = 10)->NSStackView {let s=NSStackView(views:views);s.spacing=spacing;s.alignment = .centerY;return s}
         func column(_ views:[NSView],_ spacing:CGFloat = 10)->NSStackView {let s=NSStackView(views:views);s.orientation = .vertical;s.alignment = .leading;s.spacing=spacing;return s}
-        func spacer()->NSView {let v=NSView();v.setContentHuggingPriority(.init(1),for:.horizontal);return v}
+        func spacer()->NSView {let v=NSView();v.setContentHuggingPriority(.init(1),for:.horizontal);v.heightAnchor.constraint(equalToConstant:1).isActive=true;return v}
         func divider()->NSBox {let v=NSBox();v.boxType = .separator;return v}
         let brandIcon=NSImageView(image:NSImage(systemSymbolName:"square.stack.3d.up.fill",accessibilityDescription:nil)!);brandIcon.contentTintColor = .controlAccentColor
         brandIcon.widthAnchor.constraint(equalToConstant:26).isActive=true;brandIcon.heightAnchor.constraint(equalToConstant:26).isActive=true
@@ -114,7 +123,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let privacy=label(L("Local. Private. Yours.","מקומי. פרטי. שלך."),13,.medium)
         let olderButton=button("Older files","קבצים ישנים","clock",#selector(showOlderFiles));olderButton.isBordered=false;olderButton.alignment = .left;olderButton.font = .systemFont(ofSize:14,weight:.medium)
         let openBin=button("Trash","פח האשפה","trash",#selector(openTrash));openBin.isBordered=false;openBin.alignment = .left;openBin.font = .systemFont(ofSize:14,weight:.medium)
-        let sidebarContent=column([brand,label(L("LOCATIONS","מיקומים"),10,.semibold,true),locationList,choose,divider(),olderButton,openBin,sidebarSpacer,privacy],18)
+        let mapEntry=button("Storage map…","מפת אחסון…","chart.pie.fill",#selector(chooseMapFolder));mapEntry.isBordered=false;mapEntry.alignment = .left;mapEntry.font = .systemFont(ofSize:14,weight:.medium)
+        mapEntry.toolTip=L("See which folders fill a folder or drive. Nothing is deleted.","ראה אילו תיקיות ממלאות תיקייה או כונן. שום דבר לא נמחק.")
+        let sidebarContent=column([brand,label(L("LOCATIONS","מיקומים"),10,.semibold,true),locationList,choose,divider(),mapEntry,olderButton,openBin,sidebarSpacer,privacy],18)
         let sidebar=NSVisualEffectView();sidebar.material = .sidebar;sidebar.blendingMode = .behindWindow;sidebar.state = .followsWindowActiveState
         sidebar.addSubview(sidebarContent);sidebarContent.translatesAutoresizingMaskIntoConstraints=false
         NSLayoutConstraint.activate([sidebar.widthAnchor.constraint(equalToConstant:216),sidebarContent.leadingAnchor.constraint(equalTo:sidebar.leadingAnchor,constant:20),sidebarContent.trailingAnchor.constraint(equalTo:sidebar.trailingAnchor,constant:-16),sidebarContent.topAnchor.constraint(equalTo:sidebar.topAnchor,constant:24),sidebarContent.bottomAnchor.constraint(equalTo:sidebar.bottomAnchor,constant:-24),locationList.widthAnchor.constraint(equalTo:sidebarContent.widthAnchor)])
@@ -122,8 +133,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         choose.font = .systemFont(ofSize:11);choose.controlSize = .small
         let resume=button("Resume","המשך סקירה","clock.arrow.circlepath",#selector(resumeFolder))
         let rescan=button("Refresh","רענן","arrow.clockwise",#selector(rescanFolder))
-        let heading=column([label(L("Your files","הקבצים שלך"),23,.semibold)],6)
-        let header=row([heading,spacer(),resume,rescan])
+        headingLabel=label(L("Your files","הקבצים שלך"),23,.semibold)
+        let heading=column([headingLabel],6)
+        mapButton=button("Storage map","מפת אחסון","chart.pie",#selector(showStorageMap))
+        mapButton.toolTip=L("See which folders take the space in this location.","ראה אילו תיקיות תופסות את המקום במיקום הזה.")
+        let header=row([heading,spacer(),mapButton,resume,rescan])
         folderLabel.font = .monospacedSystemFont(ofSize:11,weight:.regular);folderLabel.textColor = .secondaryLabelColor;folderLabel.lineBreakMode = .byTruncatingMiddle
         folderLabel.stringValue=L("Choose a location from the sidebar to begin","בחר מיקום מהסרגל הצדדי כדי להתחיל")
         search.placeholderString=L("Search files…","חפש קבצים…");search.delegate=self;search.controlSize = .large
@@ -131,6 +145,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         sizeFilter.addItems(withTitles:[L("All sizes","כל הגדלים"),"> 10 MB","> 100 MB","> 1 GB"]);sizeFilter.selectItem(at:0)
         kindFilter.addItem(withTitle:L("All types","כל הסוגים"));kindFilter.addItems(withTitles:FileKind.allCases.map(\.rawValue))
         for popup in [sizeFilter,kindFilter] {popup.target=self;popup.action = #selector(applyFilters);popup.font = .systemFont(ofSize:12)}
+        sizeFilter.setAccessibilityLabel(L("Minimum size","גודל מינימלי"));kindFilter.setAccessibilityLabel(L("File type","סוג קובץ"));sortPicker.setAccessibilityLabel(L("Sort order","סדר מיון"))
+        mode.setAccessibilityLabel(L("Review view","תצוגת סקירה"));groupPicker.setAccessibilityLabel(L("Duplicate group","קבוצת כפילויות"));agePicker.setAccessibilityLabel(L("Age filter","סינון לפי גיל"));table.setAccessibilityLabel(L("Files","קבצים"))
         sortPicker.addItems(withTitles:[L("Largest first","הגדולים תחילה"),L("Smallest first","הקטנים תחילה"),L("Oldest first","הישנים תחילה"),L("Newest first","החדשים תחילה"),L("Name A–Z","שם א–ת"),L("Name Z–A","שם ת–א")]);sortPicker.target=self;sortPicker.action = #selector(changeSort);sortPicker.font = .systemFont(ofSize:12)
         let filters=row([search,sizeFilter,kindFilter,sortPicker]);search.setContentHuggingPriority(.init(1),for:.horizontal)
         mode.addItems(withTitles:[L("All files","כל הקבצים"),L("Exact duplicates","כפילויות זהות"),L("Similar images","תמונות דומות"),L("Older files","קבצים ישנים")]);mode.target=self;mode.action = #selector(modeChanged)
@@ -140,7 +156,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         agePicker.addItems(withTitles:[L("Not modified in 6 months","לא שונו בחצי שנה"),L("Not modified in 1 year","לא שונו בשנה"),L("Not modified in 2 years","לא שונו בשנתיים"),L("Not modified in 5 years","לא שונו בחמש שנים")]);agePicker.selectItem(at:1);agePicker.target=self;agePicker.action = #selector(applyFilters)
         ageHint.font = .systemFont(ofSize:11);ageHint.textColor = .secondaryLabelColor
         let analysis=row([mode,groupPicker,agePicker,spacer(),exactButton,similarButton])
-        let scroll=NSScrollView();scroll.hasVerticalScroller=true;scroll.hasHorizontalScroller=true;scroll.autohidesScrollers=true
+        scroll=NSScrollView();scroll.hasVerticalScroller=true;scroll.hasHorizontalScroller=true;scroll.autohidesScrollers=true
         table.frame=NSRect(x:0,y:0,width:540,height:440);table.autoresizingMask=[.width];table.owner=self;table.delegate=self;table.dataSource=self
         table.allowsMultipleSelection=true;table.rowHeight=38;table.intercellSpacing=NSSize(width:12,height:4);table.usesAlternatingRowBackgroundColors=false;table.style = .inset;table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle
         for (id,title,width) in [("name",L("Name","שם"),240.0),("size",L("On disk","בדיסק"),80.0),("modified",L("Last modified","שינוי אחרון"),100.0)] {
@@ -163,9 +179,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         emptyIcon.widthAnchor.constraint(equalToConstant:40).isActive=true;emptyIcon.heightAnchor.constraint(equalToConstant:40).isActive=true
         emptyList=column([emptyIcon,emptyListTitle,emptyListDetail],12);emptyList.alignment = .centerX;emptyList.translatesAutoresizingMaskIntoConstraints=false;listHost.addSubview(emptyList)
         NSLayoutConstraint.activate([scroll.leadingAnchor.constraint(equalTo:listHost.leadingAnchor),scroll.trailingAnchor.constraint(equalTo:listHost.trailingAnchor),scroll.topAnchor.constraint(equalTo:listHost.topAnchor),scroll.bottomAnchor.constraint(equalTo:listHost.bottomAnchor),emptyList.centerXAnchor.constraint(equalTo:listHost.centerXAnchor),emptyList.centerYAnchor.constraint(equalTo:listHost.centerYAnchor)])
+        mapPanel.translatesAutoresizingMaskIntoConstraints=false;listHost.addSubview(mapPanel,positioned:.below,relativeTo:emptyList);mapPanel.isHidden=true
+        NSLayoutConstraint.activate([mapPanel.leadingAnchor.constraint(equalTo:listHost.leadingAnchor,constant:12),mapPanel.trailingAnchor.constraint(equalTo:listHost.trailingAnchor,constant:-12),mapPanel.topAnchor.constraint(equalTo:listHost.topAnchor,constant:12),mapPanel.bottomAnchor.constraint(equalTo:listHost.bottomAnchor)])
+        mapPanel.onReview={[weak self] url in self?.reviewFromMap(url)}
+        mapPanel.onReveal={[weak self] url in self?.revealFolder(url)}
+        mapPanel.onSelectionChange={[weak self] in self?.refreshEmptyState()}
+        previewHost.addSubview(mapPanel.detail);mapPanel.detail.translatesAutoresizingMaskIntoConstraints=false;mapPanel.detail.isHidden=true
+        NSLayoutConstraint.activate([mapPanel.detail.leadingAnchor.constraint(equalTo:previewHost.leadingAnchor,constant:22),mapPanel.detail.trailingAnchor.constraint(equalTo:previewHost.trailingAnchor,constant:-22),mapPanel.detail.topAnchor.constraint(equalTo:previewHost.topAnchor,constant:26)])
         let split=NSSplitView();split.isVertical=true;split.dividerStyle = .thin;split.addArrangedSubview(listHost);split.addArrangedSubview(previewHost)
         listHost.widthAnchor.constraint(greaterThanOrEqualToConstant:480).isActive=true;previewHost.widthAnchor.constraint(greaterThanOrEqualToConstant:270).isActive=true
-        let workspace=NSBox();workspace.boxType = .custom;workspace.borderColor = .separatorColor;workspace.borderWidth=0.5;workspace.cornerRadius=12;workspace.fillColor = .controlBackgroundColor;workspace.contentViewMargins = NSSize(width:0,height:0);workspace.contentView=split
+        let workspace=NSBox();workspace.boxType = .custom;workspace.borderColor = .separatorColor;workspace.borderWidth=0.5;workspace.cornerRadius=12;workspace.fillColor = .controlBackgroundColor;workspace.contentViewMargins = NSSize(width:0,height:0);workspace.contentView=split;workspace.setContentHuggingPriority(.init(1),for:.vertical)
         let all=button("Select all","בחר הכול","checkmark.circle",#selector(selectAllFiles))
         extrasButton=button("Select extra copies","בחר עותקים נוספים","checkmark.circle.badge.plus",#selector(selectExtras))
         selectionLabel.font = .systemFont(ofSize:12,weight:.medium);selectionLabel.textColor = .secondaryLabelColor
@@ -175,15 +198,18 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let trash=button("Move to Trash…","העבר לפח…","trash",#selector(trashSelection));trash.contentTintColor = .systemRed
         undoButton=button("Undo","שחזר","arrow.uturn.backward",#selector(undoTrash))
         redoButton=button("Redo","בצע שוב","arrow.uturn.forward",#selector(redoTrash))
-        let review=row([preview,next,spacer(),undoButton,redoButton,trash])
+        retryButton=button("Retry restore","נסה לשחזר שוב","arrow.clockwise.circle",#selector(retryRestore));retryButton.isHidden=true
+        retryButton.toolTip=L("Try again to restore items whose original location was taken. Nothing is overwritten.","נסה שוב לשחזר פריטים שהמיקום המקורי שלהם נתפס. שום קובץ לא נדרס.")
+        let review=row([preview,next,spacer(),retryButton,undoButton,redoButton,trash])
         cancelButton=NSButton(title:L("Cancel","בטל"),target:self,action:#selector(cancelWork));cancelButton.bezelStyle = .rounded;cancelButton.isEnabled=false
         spinner.style = .spinning;spinner.controlSize = .small;spinner.isDisplayedWhenStopped=false
         status.font = .systemFont(ofSize:11);status.textColor = .secondaryLabelColor;status.lineBreakMode = .byTruncatingTail
         let footer=row([spinner,status,spacer(),cancelButton],8)
-        let tips=label(L("Space · Preview     Delete · Trash     ⌘Z · Undo","רווח · תצוגה     Delete · פח     ⌘Z · שחזור"),11,.regular,true)
+        tips=label(L("Space · Preview     Delete · Trash     ⌘Z · Undo","רווח · תצוגה     Delete · פח     ⌘Z · שחזור"),11,.regular,true)
         let bottom=row([tips,spacer()])
         let content=column([header,folderLabel,filters,analysis,ageHint,workspace,selection,divider(),review,footer,bottom],12)
         content.setCustomSpacing(20,after:header);content.setCustomSpacing(16,after:folderLabel)
+        reviewOnlyViews=[filters,analysis,ageHint,selection,review]
         let host=NSView();host.addSubview(content);content.translatesAutoresizingMaskIntoConstraints=false
         let rootLayout=row([sidebar,host],0);rootLayout.alignment = .top;rootLayout.distribution = .fill;rootLayout.translatesAutoresizingMaskIntoConstraints=false;window.contentView!.addSubview(rootLayout)
         NSLayoutConstraint.activate([rootLayout.leadingAnchor.constraint(equalTo:window.contentView!.leadingAnchor),rootLayout.trailingAnchor.constraint(equalTo:window.contentView!.trailingAnchor),rootLayout.topAnchor.constraint(equalTo:window.contentView!.topAnchor),rootLayout.bottomAnchor.constraint(equalTo:window.contentView!.bottomAnchor),sidebar.heightAnchor.constraint(equalTo:rootLayout.heightAnchor),host.widthAnchor.constraint(equalTo:rootLayout.widthAnchor,constant:-216),host.heightAnchor.constraint(equalTo:rootLayout.heightAnchor),content.leadingAnchor.constraint(equalTo:host.leadingAnchor,constant:26),content.trailingAnchor.constraint(equalTo:host.trailingAnchor,constant:-26),content.topAnchor.constraint(equalTo:host.topAnchor,constant:24),content.bottomAnchor.constraint(equalTo:host.bottomAnchor,constant:-18),workspace.heightAnchor.constraint(greaterThanOrEqualToConstant:250)])
@@ -192,14 +218,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         status.stringValue=L("Ready — choose a location to start.","מוכן — בחר מיקום כדי להתחיל.")
         if smokeMode {runSmokeTests();return}
         if ProcessInfo.processInfo.arguments.contains("--launch-check") {print("Packaged launch passed: production preferences and interface initialized; no scan started.");fflush(stdout);exit(0)}
-        if ProcessInfo.processInfo.arguments.contains("--demo") { prepareDemo() }
+        if demoMode { prepareDemo() }
         window.makeKeyAndOrderFront(nil);window.makeFirstResponder(table);NSApp.activate(ignoringOtherApps:true)
     }
     func prepareDemo() {
-        window.title="Keepelix · Read-only demo"
-        let folder=FileManager.default.temporaryDirectory.appendingPathComponent("Keepelix-Demo-"+UUID().uuidString,isDirectory:true)
+        window.title="Keepelix · Read-only demo";window.setContentSize(NSSize(width:1190,height:768));window.center()
+        let container=FileManager.default.temporaryDirectory.appendingPathComponent("Keepelix-Demo-"+UUID().uuidString,isDirectory:true)
+        let folder=container.appendingPathComponent(L("Example collection","אוסף לדוגמה"),isDirectory:true)
         do {
-            try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true);demoFolder=folder
+            try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true);demoFolder=container
             for (index,name) in ["Coastal morning.png","Coastal morning — copy.png","Mountain light.png","Weekend palette.png"].enumerated() {
                 let image=NSImage(size:NSSize(width:1200,height:900));image.lockFocus()
                 NSGradient(starting:NSColor(calibratedRed:0.77,green:0.88,blue:0.89,alpha:1),ending:NSColor(calibratedRed:0.94,green:0.88,blue:0.75,alpha:1))!.draw(in:NSRect(x:0,y:0,width:1200,height:900),angle:90)
@@ -212,11 +239,20 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             try Data("Synthetic demo notes. These files were generated for the interface preview.".utf8).write(to:folder.appendingPathComponent("Weekend notes.txt"))
             try FileManager.default.setAttributes([.modificationDate:Date(timeIntervalSince1970:1514764800)],ofItemAtPath:folder.appendingPathComponent("Weekend notes.txt").path)
             try FileManager.default.setAttributes([.modificationDate:Date(timeIntervalSince1970:1577836800)],ofItemAtPath:folder.appendingPathComponent("Mountain light.png").path)
+            for (sub,size) in [("Trips/2019 Coast",640_000),("Trips/Mountains",280_000),("Exports",120_000),("Archive/Old phone",60_000)] {
+                let dir=folder.appendingPathComponent(sub,isDirectory:true);try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
+                try Data(repeating:0x2e,count:size).write(to:dir.appendingPathComponent("clip.bin"));try Data(repeating:0x2e,count:size/3).write(to:dir.appendingPathComponent("notes.bin"))
+            }
             root=folder;files=try Scanner.scan(root:folder,token:CancellationToken()).files;sizeFilter.selectItem(at:0);applyFilters()
             folderLabel.stringValue=L("Example collection · generated demo files","אוסף לדוגמה · קבצים מלאכותיים")
             status.stringValue=L("Read-only demo · generated files only","הדגמה לקריאה בלבד · קבצים מלאכותיים בלבד")
             if let row=shown.firstIndex(where:{$0.name == "Coastal morning.png"}) {table.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false);previewOpen=true;updatePreview()}
-        } catch {show("Demo unavailable",error.localizedDescription)}
+            if ProcessInfo.processInfo.arguments.contains("--demo-map") {
+                mapPanel.load(try StorageMapper.map(root:folder,token:CancellationToken()));mapRoot=folder;setMapMode(true)
+                folderLabel.stringValue=L("Example collection · generated demo files","אוסף לדוגמה · קבצים מלאכותיים")
+                status.stringValue=L("Read-only demo · generated files only","הדגמה לקריאה בלבד · קבצים מלאכותיים בלבד")
+            }
+        } catch {show(L("Demo unavailable","ההדגמה אינה זמינה"),error.localizedDescription)}
     }
     func applicationWillTerminate(_ notification:Notification) {
         if let demoFolder=demoFolder {try? FileManager.default.removeItem(at:demoFolder);preferences.removePersistentDomain(forName:"Keepelix.SyntheticDemo")}
@@ -246,16 +282,19 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     func validateMenuItem(_ item:NSMenuItem)->Bool {
         if item.action == #selector(undoCommand) {
             if let editor=window.firstResponder as? NSTextView {return editor.undoManager?.canUndo ?? false}
-            return !busy && !demoMode && history.canUndo
+            return !busy && !demoMode && !mapMode && history.canUndo
         }
         if item.action == #selector(redoCommand) {
             if let editor=window.firstResponder as? NSTextView {return editor.undoManager?.canRedo ?? false}
-            return !busy && !demoMode && history.canRedo
+            return !busy && !demoMode && !mapMode && history.canRedo
         }
         return true
     }
-    @objc func aboutApp() { show(L("Keepelix 0.1.0 beta 2", "Keepelix 0.1.0 בטא 2"), "© 2026 Daniel Siman Tov\n" + L("Contact: ","יצירת קשר: ") + "daniel.simisi@gmail.com\n\n" + L("Offline file review. MIT license. Not affiliated with WhatsApp or Meta. Undo is available for this app session; Finder Trash remains available afterward.","סקירת קבצים מקומית. רישיון MIT. ללא שיוך ל־WhatsApp או Meta. שחזור באפליקציה זמין במהלך ההפעלה הנוכחית; הפח של Finder נשאר זמין לאחר מכן.")) }
-    func show(_ title: String, _ detail: String) { let a=NSAlert();a.messageText=title;a.informativeText=detail;a.runModal() }
+    @objc func aboutApp() { show(L("Keepelix 0.1.0 beta 3", "Keepelix 0.1.0 בטא 3"), "© 2026 Daniel Siman Tov\n" + L("Contact: ","יצירת קשר: ") + "daniel.simisi@gmail.com\n\n" + L("Offline file review. MIT license. Not affiliated with WhatsApp or Meta. Undo is available for this app session; Finder Trash remains available afterward.","סקירת קבצים מקומית. רישיון MIT. ללא שיוך ל־WhatsApp או Meta. שחזור באפליקציה זמין במהלך ההפעלה הנוכחית; הפח של Finder נשאר זמין לאחר מכן.")) }
+    func show(_ title: String, _ detail: String) {
+        if smokeMode { print("Alert suppressed in smoke mode: \(title) — \(detail)"); return }
+        let a=NSAlert();a.messageText=title;a.informativeText=detail;a.runModal()
+    }
     @objc func openTrash() {
         let url=FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent(".Trash",isDirectory:true)
         if !NSWorkspace.shared.open(url) { show(L("Cannot open Trash","לא ניתן לפתוח את הפח"),L("Open Trash from the Dock.","אפשר לפתוח את פח האשפה מה־Dock.")) }
@@ -291,7 +330,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         guard !busy else { return }
         if let path=preferences.string(forKey:"lastFolder") { startScan(URL(fileURLWithPath:path)) } else { chooseFolder() }
     }
-    @objc func rescanFolder() { if let root=root, !busy { startScan(root) } }
+    @objc func rescanFolder() {
+        guard !busy else { return }
+        if mapMode { if let target=mapRoot { startMap(target) } } else if let root=root { startScan(root) }
+    }
     @objc func cancelWork() { token.cancel();status.stringValue=L("Cancelling…","מבטל…") }
     func setBusy(_ value: Bool) { busy=value;updateEnabled();if value{spinner.startAnimation(nil)}else{spinner.stopAnimation(nil)} }
     func updateEnabled() {
@@ -302,13 +344,17 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             if let action=b.action, requiresSelection.contains(action) { b.isEnabled = !busy && !selectedFiles.isEmpty }
             if let action=b.action, requiresFiles.contains(action) { b.isEnabled = !busy && !files.isEmpty }
             if b.action == #selector(showOlderFiles) { b.isEnabled = !busy && root != nil }
-            if b.action == #selector(rescanFolder) { b.isEnabled = !busy && root != nil }
+            if b.action == #selector(rescanFolder) { b.isEnabled = !busy && (mapMode ? mapRoot != nil : root != nil) }
+            if b.action == #selector(showStorageMap) { b.isEnabled = !busy && (mapMode ? root != nil : (root != nil || mapPanel.result != nil)) }
+            if b.action == #selector(retryRestore) { b.isEnabled = !busy && !demoMode && !mapMode && history.blockedCount > 0 }
             if demoMode && (b.action == #selector(trashSelection) || b.action == #selector(undoTrash) || b.action == #selector(redoTrash)) { b.isEnabled=false }
             if b.action == #selector(resumeFolder) { b.isEnabled = !busy && preferences.string(forKey:"lastFolder") != nil }
         }; cancelButton?.isEnabled=busy
         [sizeFilter,kindFilter,mode,groupPicker,agePicker,sortPicker].forEach{$0.isEnabled = !busy};search.isEnabled = !busy
-        undoButton?.isEnabled = !busy && !demoMode && history.canUndo
-        redoButton?.isEnabled = !busy && !demoMode && history.canRedo
+        undoButton?.isEnabled = !busy && !demoMode && !mapMode && history.canUndo
+        redoButton?.isEnabled = !busy && !demoMode && !mapMode && history.canRedo
+        if !busy { retryButton?.isHidden = history.blockedCount == 0 } // history is only touched by the work queue while busy
+        mapPanel.setEnabled(!busy)
         extrasButton?.isEnabled = !busy && mode.indexOfSelectedItem == 1 && !exact.isEmpty
         extrasButton?.isHidden = mode.indexOfSelectedItem != 1
     }
@@ -319,7 +365,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     func startScan(_ url: URL) {
         guard !busy else{return}
-        do { activateRoot(try FileSafety.root(url)) } catch { show("Cannot scan",error.localizedDescription);return }
+        do { activateRoot(try FileSafety.root(url)) } catch { show(L("Cannot scan this folder","לא ניתן לסרוק את התיקייה"),error.localizedDescription);return }
+        if mapMode { setMapMode(false) }
         let selectedRoot=root!;preferences.set(selectedRoot.path,forKey:"lastFolder");folderLabel.stringValue=selectedRoot.path
         primary.previewItem=nil;comparison.previewItem=nil;files=[];exact=[];similar=[];guards=[:];mode.selectItem(at:0);modeChanged()
         token=CancellationToken();let jobToken=token;setBusy(true);status.stringValue=L("Scanning file metadata…","סורק שמות וגדלים…")
@@ -328,12 +375,91 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
                 let result=try Scanner.scan(root:selectedRoot,token:jobToken){count in DispatchQueue.main.async{self.status.stringValue=L("Scanning: ","נסרקו: ")+String(count)}}
                 DispatchQueue.main.async {
                     self.files=result.files;self.setBusy(false);self.applyFilters()
-                    self.status.stringValue="\(result.files.count) files · \(result.skipped) skipped" + (result.cancelled ? " · Cancelled (partial results)" : "")
+                    self.status.stringValue="\(result.files.count) "+L("files","קבצים")+" · \(result.skipped) "+L("skipped","דולגו") + (result.cancelled ? " · "+L("Cancelled · partial results","בוטל · תוצאות חלקיות") : "")
                     if let last=self.preferences.string(forKey:"lastFile"),let i=self.shown.firstIndex(where:{$0.id==last}) {self.table.selectRowIndexes(IndexSet(integer:i),byExtendingSelection:false);self.table.scrollRowToVisible(i)}
                 }
-            } catch {DispatchQueue.main.async{self.setBusy(false);self.show("Scan failed",error.localizedDescription)}}
+            } catch {DispatchQueue.main.async{self.setBusy(false);self.show(L("Scan failed","הסריקה נכשלה"),error.localizedDescription)}}
         }
     }
+    // MARK: Storage map
+    func setMapMode(_ on:Bool) {
+        mapMode=on
+        reviewOnlyViews.forEach{$0.isHidden=on}
+        scroll.isHidden=on;mapPanel.isHidden = !on;mapPanel.detail.isHidden = !on
+        headingLabel.stringValue = on ? L("Where is the space?","איפה המקום?") : L("Your files","הקבצים שלך")
+        tips.stringValue = on ? L("Return · Open folder     ⌘↑ · Up     Review files here · Switch to file review","Return · פתיחת תיקייה     ⌘↑ · למעלה     סקור קבצים כאן · מעבר לסקירת קבצים") : L("Space · Preview     Delete · Trash     ⌘Z · Undo","רווח · תצוגה     Delete · פח     ⌘Z · שחזור")
+        mapButton.title = on ? L("Back to files","חזרה לקבצים") : L("Storage map","מפת אחסון")
+        mapButton.image = NSImage(systemSymbolName: on ? "list.bullet" : "chart.pie",accessibilityDescription:nil);mapButton.setAccessibilityLabel(mapButton.title)
+        if on {
+            if !demoMode { folderLabel.stringValue = mapRoot?.path ?? folderLabel.stringValue }
+            primary.previewItem=nil;comparison.previewItem=nil;previewPlaceholder.isHidden=true;primary.isHidden=true;comparison.isHidden=true
+        } else {
+            if !demoMode { folderLabel.stringValue = root?.path ?? L("Choose a location from the sidebar to begin","בחר מיקום מהסרגל הצדדי כדי להתחיל") }
+            ageHint.isHidden = mode.indexOfSelectedItem != 3;comparison.isHidden = !(mode.indexOfSelectedItem == 1 || mode.indexOfSelectedItem == 2);updateSelection()
+        }
+        refreshEmptyState();updateEnabled()
+    }
+    func refreshEmptyState() {
+        if mapMode {
+            emptyList?.isHidden = !mapPanel.isEmpty
+            emptyListTitle?.stringValue = busy ? L("Measuring folders…","מודד תיקיות…") : L("See where the space goes","לראות לאן הולך המקום")
+            emptyListDetail?.stringValue = busy ? L("A large drive can take a while. Cancel keeps partial results.","כונן גדול עשוי לקחת זמן. ביטול שומר תוצאות חלקיות.") : L("Choose Storage map in the sidebar, then a folder or drive","בחר מפת אחסון בסרגל הצדדי, ואז תיקייה או כונן")
+        } else {
+            emptyList?.isHidden = !shown.isEmpty
+            emptyListTitle?.stringValue = busy ? L("Scanning…","סורק…") : (root == nil ? L("Start somewhere simple","מתחילים בתיקייה אחת") : L("No matching files","אין קבצים מתאימים"))
+            emptyListDetail?.stringValue = busy ? L("Reading names and sizes only. Cancel keeps what was found.","קורא רק שמות וגדלים. ביטול שומר את מה שנמצא.") : (root == nil ? L("Choose a location from the sidebar","בחר מיקום מהסרגל הצדדי") : L("Try another filter or location","נסה מסנן אחר או מיקום אחר"))
+        }
+    }
+    @objc func chooseMapFolder() {
+        guard !busy else { return }
+        let p=NSOpenPanel();p.canChooseDirectories=true;p.canChooseFiles=false;p.allowsMultipleSelection=false
+        p.directoryURL=FileManager.default.homeDirectoryForCurrentUser;p.prompt=L("Map","מפה")
+        p.message=L("Choose the folder or drive to map. Sizes are measured on this Mac; nothing is moved or uploaded.","בחר תיקייה או כונן למיפוי. הגדלים נמדדים במק הזה; שום דבר לא מועבר או מועלה.")
+        if p.runModal() == .OK, let u=p.url { startMap(u) }
+    }
+    @objc func showStorageMap() {
+        guard !busy else { return }
+        if mapMode { if root != nil { setMapMode(false);window.makeFirstResponder(table) };return }
+        guard let current=root else { chooseMapFolder();return }
+        if mapPanel.result != nil, mapPanel.reveal(folder:current) { mapRoot=mapPanel.result?.root.url;setMapMode(true);window.makeFirstResponder(mapPanel.table);return }
+        startMap(current)
+    }
+    func startMap(_ url:URL) {
+        guard !busy else { return }
+        let target:URL
+        do { target=try FileSafety.root(url) } catch {
+            let detail = url.standardizedFileURL.path == "/" ? L("The whole startup disk cannot be mapped. Choose your home folder, a folder inside it, or an external drive.","אי אפשר למפות את כל דיסק ההפעלה. בחר את תיקיית הבית, תיקייה בתוכה או כונן חיצוני.") : error.localizedDescription
+            show(L("Cannot map this folder","לא ניתן למפות את התיקייה"),detail);return
+        }
+        mapRoot=target;mapPanel.load(nil);setMapMode(true);folderLabel.stringValue=target.path
+        token=CancellationToken();let jobToken=token;setBusy(true);refreshEmptyState()
+        status.stringValue=L("Measuring folders…","מודד תיקיות…")
+        work.async {
+            do {
+                var lastUpdate=Date.distantPast
+                let result=try StorageMapper.map(root:target,token:jobToken){entries,total in
+                    guard Date().timeIntervalSince(lastUpdate)>0.2 else {return};lastUpdate=Date()
+                    DispatchQueue.main.async{self.status.stringValue=L("Measuring: ","מודד: ")+"\(entries) "+L("items","פריטים")+" · "+bytes(total)}
+                }
+                DispatchQueue.main.async {
+                    self.setBusy(false);self.mapPanel.load(result);self.refreshEmptyState()
+                    self.status.stringValue=self.mapSummary(result);self.window.makeFirstResponder(self.mapPanel.table)
+                }
+            } catch {DispatchQueue.main.async{self.setBusy(false);self.refreshEmptyState();self.show(L("Cannot map this folder","לא ניתן למפות את התיקייה"),error.localizedDescription)}}
+        }
+    }
+    func mapSummary(_ result:StorageMapResult)->String {
+        let r=result.root
+        var parts=[bytes(r.bytes)+" · \(r.files) "+L("files","קבצים")+" · \(r.directories) "+L("folders","תיקיות")]
+        if r.inaccessible>0 {parts.append("\(r.inaccessible) "+L("not accessible","לא נגישים"))}
+        if r.notDownloaded>0 {parts.append("\(r.notDownloaded) "+L("not downloaded","לא הורדו"))}
+        if r.otherVolumes>0 {parts.append("\(r.otherVolumes) "+L("other volumes skipped","כוננים אחרים דולגו"))}
+        if result.sharedFiles>0 {parts.append("\(result.sharedFiles) "+L("hard links counted once","קישורים קשיחים נספרו פעם אחת"))}
+        if result.cancelled {parts.append(L("Cancelled · partial results","בוטל · תוצאות חלקיות"))}
+        return parts.joined(separator:" · ")
+    }
+    func reviewFromMap(_ url:URL) { guard !busy else{return};startScan(url) }
+    func revealFolder(_ url:URL) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
     var currentGroups: [DuplicateGroup] {mode.indexOfSelectedItem == 1 ? exact : (mode.indexOfSelectedItem == 2 ? similar : [])}
     @objc func modeChanged() {
         groupPicker.removeAllItems();groupPicker.addItem(withTitle:L("All groups","כל הקבוצות"))
@@ -360,7 +486,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         table.reloadData();table.selectRowIndexes(IndexSet(shown.indices.filter{old.contains(shown[$0].id)}),byExtendingSelection:false)
         updateSelection()
     }
-    @objc func showOlderFiles() { guard !busy,root != nil else{return};mode.selectItem(at:3);modeChanged() }
+    @objc func showOlderFiles() { guard !busy,root != nil else{return};if mapMode {setMapMode(false)};mode.selectItem(at:3);modeChanged();window.makeFirstResponder(table) }
     @objc func changeSort() {
         guard !busy else{return}
         let order=ReviewSort(rawValue:sortPicker.indexOfSelectedItem) ?? .largest
@@ -393,29 +519,27 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     func tableViewSelectionDidChange(_ notification:Notification){updateSelection()}
     func updateSelection(){
         let chosen=selectedFiles;selectionLabel.stringValue="\(chosen.count) / \(shown.count) " + L("selected","נבחרו") + " · " + bytes(chosen.reduce(0){$0+$1.allocatedBytes})
-        emptyList?.isHidden = !shown.isEmpty
-        emptyListTitle?.stringValue = root == nil ? L("Start somewhere simple","מתחילים בתיקייה אחת") : L("No matching files","אין קבצים מתאימים")
-        emptyListDetail?.stringValue = root == nil ? L("Choose a location from the sidebar","בחר מיקום מהסרגל הצדדי") : L("Try another filter or location","נסה מסנן אחר או מיקום אחר")
+        refreshEmptyState()
         if let f=chosen.first{preferences.set(f.id,forKey:"lastFile")};updatePreview();updateEnabled()
     }
     @objc func selectAllCommand(){
         if let text = window.firstResponder as? NSTextView { text.selectAll(nil) } else { selectAllFiles() }
     }
     @objc func selectAllFiles(){
-        guard !busy else{return};guards=[:];table.selectAll(nil);updateSelection()
+        guard !busy,!mapMode else{return};guards=[:];table.selectAll(nil);updateSelection()
     }
-    @objc func deselect(){guard !busy else{return};guards=[:];table.deselectAll(nil);updateSelection()}
+    @objc func deselect(){guard !busy,!mapMode else{return};guards=[:];table.deselectAll(nil);updateSelection()}
     @objc func nextFile(){guard !busy,!shown.isEmpty else{return};let i=min(max(table.selectedRow+1,0),shown.count-1);table.selectRowIndexes(IndexSet(integer:i),byExtendingSelection:false);table.scrollRowToVisible(i);window.makeFirstResponder(table)}
     @objc func togglePreview(){guard !busy else{return};previewOpen.toggle();updatePreview();window.makeFirstResponder(table)}
     func updatePreview(){
         primary?.previewItem=nil;comparison?.previewItem=nil
         previewPlaceholder?.isHidden = false;primary?.isHidden = true
-        guard !busy,previewOpen,let f=selectedFiles.first,let root=root,(try? FileSafety.validate(f,root:root)) != nil else{return}
+        guard !busy,!mapMode,previewOpen,let f=selectedFiles.first,let root=root,(try? FileSafety.validate(f,root:root)) != nil else{return}
         previewPlaceholder?.isHidden = true;primary.isHidden = false
         primary.previewItem=f.url as NSURL
         if (mode.indexOfSelectedItem == 1 || mode.indexOfSelectedItem == 2), let group=currentGroups.first(where:{$0.members.contains(where:{$0.id==f.id})}),let other=(mode.indexOfSelectedItem == 2 && f.id != group.anchor.id ? group.anchor : group.members.first(where:{$0.id != f.id})),(try? FileSafety.validate(other,root:root)) != nil{comparison.previewItem=other.url as NSURL}
     }
-    @objc func reveal(){guard !busy,contextRow>=0,contextRow<shown.count,let root=root else{return};let f=shown[contextRow];do{try FileSafety.validate(f,root:root);NSWorkspace.shared.activateFileViewerSelecting([f.url])}catch{show("File unavailable",error.localizedDescription)}}
+    @objc func reveal(){guard !busy,contextRow>=0,contextRow<shown.count,let root=root else{return};let f=shown[contextRow];do{try FileSafety.validate(f,root:root);NSWorkspace.shared.activateFileViewerSelecting([f.url])}catch{show(L("File unavailable","הקובץ אינו זמין"),error.localizedDescription)}}
     @objc func findExactDuplicates(){runAnalysis(similar:false)}
     @objc func findSimilarImages(){
         guard !busy,root != nil else{return};let a=NSAlert();a.messageText=L("Compare images?","להשוות תמונות?");a.informativeText=L("Local comparison. Similarity is a suggestion; nothing is selected for deletion.","השוואה מקומית. דמיון הוא הצעה לבדיקה; לא תיבחר מחיקה אוטומטית.");a.addButton(withTitle:L("Compare","השווה"));a.addButton(withTitle:L("Cancel","בטל"));if a.runModal() == .alertFirstButtonReturn{runAnalysis(similar:true)}
@@ -430,7 +554,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
                 DispatchQueue.main.async{
                     if similar{self.similar=result.groups}else{self.exact=result.groups}
                     self.setBusy(false);self.mode.selectItem(at:similar ? 2:1);self.sizeFilter.selectItem(at:0);self.kindFilter.selectItem(at:0);self.search.stringValue="";self.modeChanged()
-                    self.status.stringValue="\(result.groups.count) groups · \(result.skipped) skipped" + (similar ? " · Review suggestions only" : " · SHA-256 exact copies")
+                    let kindNote = similar ? L("Review suggestions only","הצעות לבדיקה בלבד") : L("SHA-256 exact copies","עותקים זהים לפי SHA-256")
+                    self.status.stringValue="\(result.groups.count) "+L("groups","קבוצות")+" · \(result.skipped) "+L("skipped","דולגו")+" · "+kindNote
                     self.table.deselectAll(nil);self.updateSelection()
                 }
             }catch{DispatchQueue.main.async{self.setBusy(false);self.status.stringValue=error.localizedDescription}}
@@ -457,7 +582,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         preferences.set(skip,forKey:"skipTrashConfirmation");sender.state = skip ? .off : .on
     }
     @objc func trashSelection(){
-        guard !busy,!demoMode,let root=root,!selectedFiles.isEmpty else{return}
+        guard !busy,!demoMode,!mapMode,let root=root,!selectedFiles.isEmpty else{return}
         let chosen=selectedFiles
         if !preferences.bool(forKey:"skipTrashConfirmation") {
             let alert=makeTrashAlert(chosen)
@@ -479,27 +604,39 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         window.makeFirstResponder(table)
     }
     @objc func undoTrash(){
-        guard !busy,!demoMode,history.canUndo else{return};setBusy(true);cancelButton.isEnabled=false
+        guard !busy,!demoMode,!mapMode,history.canUndo else{return};setBusy(true);cancelButton.isEnabled=false
         work.async {
             let result=self.history.undo(backend:self.trashBackend)
-            DispatchQueue.main.async {
-                self.setBusy(false);guard let result=result else{return}
-                if let root=self.root {
-                    for url in result.restored {
-                        if let record=try? FileRecord(url:url),(try? FileSafety.validate(record,root:root)) != nil {
-                            self.files.removeAll{$0.id == record.id};self.files.append(record)
-                        }
-                    }
-                }
-                self.exact=[];self.similar=[];self.mode.selectItem(at:0);self.modeChanged()
-                self.status.stringValue="\(result.restored.count) " + L("restored","שוחזרו")
-                if !result.failures.isEmpty {self.show(L("Some files could not be restored","חלק מהקבצים לא שוחזרו"),result.failures.map{$0.url.lastPathComponent+": "+$0.message}.joined(separator:"\n"))}
-                self.window.makeFirstResponder(self.table)
-            }
+            DispatchQueue.main.async {self.finishRestore(result)}
         }
     }
+    @objc func retryRestore(){
+        guard !busy,!demoMode,!mapMode,history.blockedCount>0 else{return};setBusy(true);cancelButton.isEnabled=false
+        work.async {
+            let result=self.history.retryBlocked(backend:self.trashBackend)
+            DispatchQueue.main.async {self.finishRestore(result)}
+        }
+    }
+    func finishRestore(_ result:RestoreResult?) {
+        setBusy(false);guard let result=result else{return}
+        if let root=root {
+            for url in result.restored {
+                if let record=try? FileRecord(url:url),(try? FileSafety.validate(record,root:root)) != nil {
+                    files.removeAll{$0.id == record.id};files.append(record)
+                }
+            }
+        }
+        exact=[];similar=[];mode.selectItem(at:0);modeChanged()
+        var text="\(result.restored.count) " + L("restored","שוחזרו")
+        if history.blockedCount>0 {text += " · \(history.blockedCount) " + L("waiting in Trash · Retry restore","ממתינים בפח · נסה לשחזר שוב")}
+        status.stringValue=text
+        if !result.failures.isEmpty {
+            show(L("Some files could not be restored","חלק מהקבצים לא שוחזרו"),result.failures.map{$0.url.lastPathComponent+": "+$0.message}.joined(separator:"\n")+"\n\n"+L("They stay in Trash. Resolve the conflict and use Retry restore, or restore them from Finder Trash. Earlier batches remain available with Undo.","הם נשארים בפח. פתור את ההתנגשות ולחץ ״נסה לשחזר שוב״, או שחזר מהפח ב־Finder. פעולות קודמות עדיין זמינות לשחזור."))
+        }
+        window.makeFirstResponder(table)
+    }
     @objc func redoTrash(){
-        guard !busy,!demoMode,history.canRedo else{return};let row=table.selectedRow;setBusy(true);cancelButton.isEnabled=false
+        guard !busy,!demoMode,!mapMode,history.canRedo else{return};let row=table.selectedRow;setBusy(true);cancelButton.isEnabled=false
         work.async {
             let result=self.history.redo(backend:self.trashBackend)
             DispatchQueue.main.async {if let result=result {self.finishMove(result,nextRow:row)}else{self.setBusy(false)}}
@@ -560,6 +697,30 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(shown.first?.url == oldURL)
             table.sortDescriptors=[NSSortDescriptor(key:"modified",ascending:false)]
             precondition(shown.last?.url == oldURL)
+            func settle() { let deadline=Date().addingTimeInterval(20);while busy && Date()<deadline {RunLoop.current.run(until:Date().addingTimeInterval(0.01))};precondition(!busy,"Synthetic operation timed out") }
+            // Storage map on a synthetic tree: measure, drill, go up, hand off to file review and return without re-mapping.
+            let mapFolder=temp.appendingPathComponent("map",isDirectory:true)
+            for sub in ["Big","Small"] {try FileManager.default.createDirectory(at:mapFolder.appendingPathComponent(sub),withIntermediateDirectories:true)}
+            try Data(repeating:0x41,count:50_000).write(to:mapFolder.appendingPathComponent("Big/large.bin"))
+            try Data("s".utf8).write(to:mapFolder.appendingPathComponent("Small/tiny.txt"));try Data("t".utf8).write(to:mapFolder.appendingPathComponent("Small/tiny2.txt"))
+            try Data("loose".utf8).write(to:mapFolder.appendingPathComponent("loose.txt"))
+            let reviewRoot=root!;let bigPath=mapFolder.appendingPathComponent("Big").resolvingSymlinksInPath().path
+            startMap(mapFolder);settle()
+            precondition(mapMode && !mapPanel.isEmpty && scroll.isHidden && !mapPanel.isHidden && emptyList.isHidden && !mapPanel.detail.isHidden)
+            precondition(mapPanel.rows.map(\.title) == ["Big","Small",L("Files in this folder","קבצים בתיקייה עצמה")],"Map rows sort by size: \(mapPanel.rows.map(\.title))")
+            precondition(mapPanel.table.selectedRow == 0 && mapPanel.reviewTarget?.path == bigPath && mapPanel.openButton.isEnabled)
+            precondition(status.stringValue.contains("4 "+L("files","קבצים")) && status.stringValue.contains("2 "+L("folders","תיקיות")),status.stringValue)
+            mapPanel.openSelected();precondition(mapPanel.current?.name == "Big" && mapPanel.rows.count == 1 && !mapPanel.rows[0].isFolder && !mapPanel.openButton.isEnabled)
+            precondition(mapPanel.reviewTarget?.path == bigPath,"The loose-files row reviews the current folder")
+            mapPanel.goUp();precondition(mapPanel.current?.name == "map" && mapPanel.selectedRow?.title == "Big")
+            let mapDelete=NSEvent.keyEvent(with:.keyDown,location:.zero,modifierFlags:[],timestamp:0,windowNumber:window.windowNumber,context:nil,characters:"",charactersIgnoringModifiers:"",isARepeat:false,keyCode:51)!
+            mapPanel.table.keyDown(with:mapDelete);precondition(!busy && FileManager.default.fileExists(atPath:mapFolder.appendingPathComponent("Big/large.bin").path),"Delete in the map must not move anything")
+            selectAllFiles();precondition(table.selectedRowIndexes.isEmpty,"Select all must not reach the hidden file table in map mode")
+            mapPanel.reviewSelected();settle()
+            precondition(!mapMode && root?.path == bigPath && files.count == 1 && files[0].name == "large.bin" && !scroll.isHidden && mapPanel.isHidden,"Review files here hands the folder to file review")
+            showStorageMap();precondition(mapMode && mapPanel.current?.name == "Big" && mapPanel.result != nil,"Return to the map without re-mapping")
+            showStorageMap();precondition(!mapMode && root?.path == bigPath,"Back to files")
+            startScan(reviewRoot);settle();precondition(!mapMode && root?.path == reviewRoot.resolvingSymlinksInPath().path)
             precondition(!history.canUndo && !history.canRedo)
             let alert=makeTrashAlert([files[0]]);precondition(alert.showsSuppressionButton && alert.suppressionButton?.state == .off)
             struct FixtureTrash: TrashBackend {
@@ -577,25 +738,48 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             let target=selectedFiles[0].url
             func key(_ code:UInt16,_ flags:NSEvent.ModifierFlags=[],_ repeated:Bool=false) {
                 let event=NSEvent.keyEvent(with:.keyDown,location:.zero,modifierFlags:flags,timestamp:0,windowNumber:window.windowNumber,context:nil,characters:"",charactersIgnoringModifiers:"",isARepeat:repeated,keyCode:code)!
-                table.keyDown(with:event)
-                let deadline=Date().addingTimeInterval(5)
-                while busy && Date()<deadline {RunLoop.current.run(until:Date().addingTimeInterval(0.01))}
-                precondition(!busy,"Synthetic keyboard operation timed out")
+                table.keyDown(with:event);settle()
             }
             key(51);precondition(!FileManager.default.fileExists(atPath:target.path) && history.canUndo)
             let count=files.count;key(51,[],true);precondition(files.count == count,"Held Delete must not trash the next file")
             key(6,[.command]);precondition(FileManager.default.fileExists(atPath:target.path) && history.canRedo)
             key(6,[.command,.shift]);precondition(!FileManager.default.fileExists(atPath:target.path) && history.canUndo)
             key(6,[.command]);precondition(FileManager.default.fileExists(atPath:target.path))
+            // Blocked restore: a newcomer at the original path is never overwritten, earlier batches stay undoable, and Retry restore succeeds once the path is free.
+            let other=shown.first{$0.url != target}!.url
+            table.selectRowIndexes(IndexSet(integer:shown.firstIndex{$0.url == other}!),byExtendingSelection:false);key(51)
+            table.selectRowIndexes(IndexSet(integer:shown.firstIndex{$0.url == target}!),byExtendingSelection:false);key(51)
+            precondition(!FileManager.default.fileExists(atPath:target.path) && !FileManager.default.fileExists(atPath:other.path))
+            try Data("newcomer".utf8).write(to:target)
+            key(6,[.command]);precondition(history.blockedCount == 1 && history.canUndo && !retryButton.isHidden && retryButton.isEnabled,"Blocked restore must not hide earlier batches")
+            let occupant=try String(contentsOf:target);precondition(occupant == "newcomer","Undo must never overwrite")
+            key(6,[.command]);precondition(FileManager.default.fileExists(atPath:other.path) && !history.canUndo && history.blockedCount == 1,"Earlier batch restored behind the blocked one")
+            try FileManager.default.removeItem(at:target)
+            retryRestore();settle()
+            let restoredText=try String(contentsOf:target)
+            precondition(history.blockedCount == 0 && retryButton.isHidden && restoredText == "Synthetic duplicate fixture" && history.canRedo && waitingRestores == 0)
             let savedRoot=root!;activateRoot(temp.appendingPathComponent("other"));precondition(!history.canUndo && !history.canRedo);activateRoot(savedRoot);precondition(history.canRedo)
             toggleTrashConfirmation(confirmationMenuItem!);precondition(!preferences.bool(forKey:"skipTrashConfirmation"))
-            print("UI smoke: selection, old-file sorting, preview, confirmation preference, Delete, Undo, Redo and held-key protection passed. No real files changed; no windows shown.")
+            print("UI smoke: storage map, selection, old-file sorting, preview, confirmation preference, Delete, Undo, Redo, blocked-restore retry and held-key protection passed. No real files changed; no windows shown.")
             cleanup();fflush(stdout);exit(0)
         } catch { fputs("UI smoke failed: \(error)\n",stderr);cleanup();exit(1) }
     }
     func windowShouldClose(_ sender:NSWindow)->Bool { applicationShouldTerminate(NSApplication.shared) == .terminateNow }
     func applicationShouldTerminate(_ sender:NSApplication)->NSApplication.TerminateReply{
-        if busy && !(token.isCancelled && cancelButton.isEnabled){show(L("Operation in progress","פעולה עדיין מתבצעת"),L("Cancel the scan and wait, or let the Trash operation finish before quitting.","בטל את הסריקה והמתן, או אפשר להעברה לפח להסתיים לפני הסגירה."));return .terminateCancel};return .terminateNow
+        if busy && !(token.isCancelled && cancelButton.isEnabled){show(L("Operation in progress","פעולה עדיין מתבצעת"),L("Cancel the scan and wait, or let the Trash operation finish before quitting.","בטל את הסריקה והמתן, או אפשר להעברה לפח להסתיים לפני הסגירה."));return .terminateCancel}
+        let waiting=waitingRestores
+        if waiting>0 && !smokeMode {
+            let a=NSAlert();a.alertStyle = .warning;a.messageText=L("Quit with restores waiting?","לצאת כשיש שחזורים ממתינים?")
+            a.informativeText="\(waiting) "+L("items could not be restored and stay in Trash. After quitting, restore them from Finder Trash; this app's history is not kept.","פריטים לא שוחזרו ונשארים בפח. אחרי היציאה אפשר לשחזר אותם מהפח ב־Finder; ההיסטוריה של האפליקציה לא נשמרת.")
+            a.addButton(withTitle:L("Quit","צא"));a.addButton(withTitle:L("Cancel","בטל"))
+            if a.runModal() != .alertFirstButtonReturn {return .terminateCancel}
+        }
+        return .terminateNow
+    }
+    var waitingRestores:Int {
+        var seen=Set<ObjectIdentifier>();var total=0
+        for h in [history]+Array(folderHistories.values) where seen.insert(ObjectIdentifier(h)).inserted {total+=h.blockedCount}
+        return total
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{true}
 }

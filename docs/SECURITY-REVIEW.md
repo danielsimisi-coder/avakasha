@@ -19,6 +19,18 @@ This is a private beta, not a certification of zero vulnerabilities. Path-based 
 
 Developer ID signing, Apple notarization, clean-Mac Gatekeeper testing, Intel runtime testing and broader permission/filesystem/accessibility acceptance remain necessary before a supported public release. External GLM review was not used; a full Coverloop external-review pass is not claimed.
 
+## Beta 3 focused review
+
+An independent adversarial pass (separate Claude context, read-only on the repository, synthetic fixtures only, no external providers) reviewed the storage map walker, the blocked-restore history and the map-mode isolation in the interface. Findings and disposition:
+
+- **Fixed, high:** `fts` returns a skipped directory once more as a post-order visit, so a mount point or undownloaded cloud folder at depth two or deeper popped its parent early and misattributed everything after it. A synthetic depth-two skip test now covers the walker; nested unreadable folders are also tested.
+- **Fixed, medium:** Select All reached the hidden file table while the map was shown. Selection actions are now guarded by map mode and selection state is refreshed on the way back.
+- **Fixed, medium:** a waiting restore whose Trash item disappeared (restored in Finder, Trash emptied) stayed waiting forever and inflated the waiting count. Such items are now reported once and dropped; changed Trash items are still kept and refused.
+- **Confirmed safe:** no overwrite on Undo or Retry in either order of conflicting paths, changed Trash items refused, tickets never dropped silently, earlier batches undoable behind a blocked one, Redo never adopts replacements, keepers enforced through blocked → retry → redo, histories per root, map mode cannot reach a Trash move, review from the map goes through the same root validation, symbolic links never followed, no file contents read (verified with a FIFO), no crash path in the `fts` bindings.
+- **Open, low:** a Redo entry for a file that no longer matches stays lit until a new move (pre-existing); waiting restores in another folder's history are only visible after returning to that folder; memory use of the map is roughly a few hundred bytes per folder.
+
+No release-blocking issue for a private beta was found after the fixes. No third pass is claimed.
+
 ## Beta 2 focused follow-up
 
 Independent review of the new history and keyboard integration found no overwrite, replacement-adoption, containment or keeper bypass. A cross-folder history UX issue was fixed by keeping separate histories for each chosen root, covered by hidden UI regression. A failed latest restore continues to block older batches until resolved; Finder Trash recovery remains available. This is a documented beta limitation. Local validation now includes 28 passing core/integration tests and the expanded keyboard smoke.
