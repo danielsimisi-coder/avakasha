@@ -39,7 +39,7 @@
 4. **Confirm once.** One dialog lists every folder, with Cancel as the default. One ⌘Z undoes it all.
 5. **Keep what you are unsure about, somewhere else.** Old projects and folders untouched for months can go to an external drive instead, verified, and come back with Bring Back.
 
-Also inside: a storage map of any folder or drive, a search for build and cache folders, data left by apps you removed, and folders untouched for months; a plain explanation of System Data; fast keyboard review with previews; WhatsApp media by chat; exact duplicates; English and Hebrew.
+Also inside: a storage map of any folder or drive; a search for build and cache folders, data left by apps you removed, and folders untouched for months; identical files anywhere in your home folder; a plain explanation of System Data; fast keyboard review with previews; WhatsApp media by chat; English and Hebrew.
 
 **What it does not promise.** It cannot shrink what macOS keeps for itself (local snapshots, purgeable space); it explains them instead. The watch runs while Avakasha is open (keep it in the menu bar and open at login). Once you empty Trash, a folder moved to a drive exists only on that drive. This is a beta, ad-hoc signed and not yet notarized.
 
@@ -161,6 +161,7 @@ The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
 | `Delete` / `⌘⌫` (map, Free up space) | Move the selected folder to Trash after a fresh measurement and a confirmation that is always shown |
 | `⇧⌘M` | Find more in your home folder (Free up space); Esc stops the search |
 | `⇧⌘O` | Offloaded folders: what was moved to a drive, and Bring Back |
+| `⌥⌘D` | Duplicates: identical files anywhere in your home folder |
 
 ## WhatsApp: groups and personal chats
 
@@ -175,6 +176,8 @@ WhatsApp for Mac keeps each chat's media in a folder named after the chat identi
 Drag one or more highlighted rows to a Finder window, a WhatsApp conversation or any app that accepts files. The drag hands over the file location as a copy; Avakasha does not move or delete anything through a drag.
 
 ## Exact is different from similar
+
+**Duplicates across your home folder.** **Duplicates** in the sidebar (⌥⌘D) looks for identical files anywhere in your home folder, not just one location: the same video in Downloads and on the Desktop, a PDF saved twice in two projects. It leaves out Library (app data and iCloud Drive), hidden folders, bundles such as the Photos library, Trash, cloud placeholders and links, and compares only files of 1 MB or more. Files are first matched by size and a fingerprint of their first and last 64 KB, then confirmed with a full SHA-256 comparison; hard links are not copies. The groups open in the duplicates view below, with nothing selected.
 
 **Exact duplicates** have matching SHA-256 content hashes. “Select extra copies” leaves one deterministic keeper per group and checks it again before moving the selected extras. You can inspect every selection before confirming.
 
@@ -224,7 +227,7 @@ docs/                    Privacy, safety, release and contributor guidance
 
 ## Status and contribution
 
-This is beta 16. Code compilation and automated tests are not substitutes for testing on every macOS version. The Intel slice is cross-built; real Intel-machine verification and clean-Mac Gatekeeper verification are release checklist items, not implied claims.
+This is beta 17. Code compilation and automated tests are not substitutes for testing on every macOS version. The Intel slice is cross-built; real Intel-machine verification and clean-Mac Gatekeeper verification are release checklist items, not implied claims.
 
 The interface is English by default. **Avakasha › Language › עברית** switches the whole app to Hebrew with right-to-left layout on the next launch (the choice is stored for this app only). Contributions to accessibility, localisation and synthetic-fixture coverage are welcome. See [CONTRIBUTING](CONTRIBUTING.md), [SECURITY](SECURITY.md), and [CHANGELOG](CHANGELOG.md).
 

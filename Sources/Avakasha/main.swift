@@ -95,7 +95,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     /// Files the user looked at and decided to keep; pinned to size and mtime, so a rewritten file shows up again.
     lazy var reviewed: ReviewedStore = { let p=preferences; return ReviewedStore(load:{ p.dictionary(forKey:"reviewedFiles") as? [String:String] ?? [:] },save:{ p.set($0,forKey:"reviewedFiles") }) }()
     /// Where the file list came from: a folder scan, or the largest files of the storage map (Refresh re-measures the map).
-    enum ReviewSource { case scan, largestFiles }
+    enum ReviewSource { case scan, largestFiles, homeDuplicates }
     var reviewSource: ReviewSource = .scan
     /// True while Refresh re-measures the map for the largest-files view; cleared when the map completes or fails.
     var pendingLargestReview = false
@@ -184,7 +184,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     /// The home screen: disks, this session, where to start. Shown at launch until something is scanned or mapped.
     var overviewMode = false
     let overviewPanel = OverviewPanel()
-    var sidebarOverview: NSButton!, sidebarMap: NSButton!, sidebarOlder: NSButton!, sidebarInstallers: NSButton!, sidebarFreeUp: NSButton!
+    var sidebarOverview: NSButton!, sidebarMap: NSButton!, sidebarOlder: NSButton!, sidebarInstallers: NSButton!, sidebarFreeUp: NSButton!, sidebarDuplicates: NSButton!
     /// "Free up space": known caches and app data explained one by one, measured on request.
     var freeUpMode = false
     let freeUpPanel = FreeUpPanel()
@@ -251,6 +251,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let olderButton=sidebarRow("Older files","קבצים ישנים","clock",#selector(showOlderFiles));sidebarOlder=olderButton
         let installersButton=sidebarRow("Installers & archives","קבצי התקנה וארכיונים","shippingbox",#selector(showInstallers));sidebarInstallers=installersButton
         installersButton.toolTip=L("Disk images, installer packages and archives in this location that have not changed for a while. Nothing is moved without a confirmation.","תמונות דיסק, חבילות התקנה וארכיונים במיקום הזה שלא השתנו זמן רב. שום דבר לא מועבר בלי אישור.")
+        let duplicatesButton=sidebarRow("Duplicates","כפילויות","square.on.square",#selector(findHomeDuplicates));sidebarDuplicates=duplicatesButton
+        duplicatesButton.toolTip=L("Identical files anywhere in your home folder (outside Library, hidden folders and bundles), compared byte for byte. Nothing is selected for you.","קבצים זהים בכל תיקיית הבית (מחוץ ל־Library, לתיקיות מוסתרות ולחבילות), בהשוואה ביט אחר ביט. שום דבר לא נבחר בשבילך.")
         let openBin=sidebarRow("Trash","פח האשפה","trash",#selector(openTrash))
         openBin.toolTip=L("Opens the Trash in Finder. Nothing is moved without a confirmation.","פותח את הפח ב־Finder. שום דבר לא מועבר בלי אישור.")
         let freeUpEntry=sidebarRow("Free up space","פינוי מקום","sparkles",#selector(showFreeUp));sidebarFreeUp=freeUpEntry
@@ -259,7 +261,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         mapEntry.toolTip=L("See which folders fill a folder or drive. Nothing is moved without a confirmation.","מראה אילו תיקיות ממלאות תיקייה או כונן. שום דבר לא מועבר בלי אישור.")
         let startSection=column([section("START","התחלה"),overviewEntry,freeUpEntry],6)
         let locationsSection=column([section("LOCATIONS","מיקומים"),locationList,choose],6)
-        let toolsSection=column([section("TOOLS","כלים"),mapEntry,olderButton,installersButton],6)
+        let toolsSection=column([section("TOOLS","כלים"),mapEntry,duplicatesButton,olderButton,installersButton],6)
         // Brand row: the app's own icon as Finder and the Dock draw it, next to the name.
         let brandIcon=NSImageView(image:NSWorkspace.shared.icon(forFile:Bundle.main.bundlePath));brandIcon.imageScaling = .scaleProportionallyUpOrDown;brandIcon.setAccessibilityElement(false)
         brandIcon.widthAnchor.constraint(equalToConstant:30).isActive=true;brandIcon.heightAnchor.constraint(equalToConstant:30).isActive=true
@@ -270,7 +272,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let sidebar=NSVisualEffectView();sidebar.material = .sidebar;sidebar.blendingMode = .behindWindow;sidebar.state = .followsWindowActiveState
         sidebar.addSubview(sidebarContent);sidebarContent.translatesAutoresizingMaskIntoConstraints=false
         NSLayoutConstraint.activate([sidebar.widthAnchor.constraint(equalToConstant:216),sidebarContent.leadingAnchor.constraint(equalTo:sidebar.leadingAnchor,constant:12),sidebarContent.trailingAnchor.constraint(equalTo:sidebar.trailingAnchor,constant:-12),sidebarContent.topAnchor.constraint(equalTo:sidebar.topAnchor,constant:24),sidebarContent.bottomAnchor.constraint(equalTo:sidebar.bottomAnchor,constant:-16)])
-        for v in [startSection,locationsSection,toolsSection,locationList]+locationButtons+[choose,overviewEntry,freeUpEntry,mapEntry,olderButton,installersButton,openBin] { v.widthAnchor.constraint(equalTo:sidebarContent.widthAnchor).isActive=true } // the highlight pill spans the sidebar
+        for v in [startSection,locationsSection,toolsSection,locationList]+locationButtons+[choose,overviewEntry,freeUpEntry,mapEntry,duplicatesButton,olderButton,installersButton,openBin] { v.widthAnchor.constraint(equalTo:sidebarContent.widthAnchor).isActive=true } // the highlight pill spans the sidebar
         NotificationCenter.default.addObserver(forName:NSWorkspace.accessibilityDisplayOptionsDidChangeNotification,object:nil,queue:.main){ [weak self] _ in self?.updateLocationHighlight() }
         let rescan=button("Refresh","רענן","arrow.clockwise",#selector(rescanFolder));rescanButton=rescan
         headingLabel=label(L("Your files","הקבצים שלך"),22,.semibold)
@@ -497,6 +499,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             if ProcessInfo.processInfo.arguments.contains("--demo-guard") { DispatchQueue.main.asyncAfter(deadline:.now()+4){ [weak self] in
                 self?.overviewPanel.setGuard(GuardState(floor:40_000_000_000,volumeName:"Macintosh HD",free:52_300_000_000,forecastDays:6,historyDays:21,
                     growthLine:L("Since 16 Sep: Xcode DerivedData +7.2 GB · WhatsApp media +3.1 GB · Downloads +1.4 GB · free −12.6 GB","מאז 16 בספט׳: Xcode DerivedData ‎+7.2 GB · מדיה של WhatsApp ‎+3.1 GB · Downloads ‎+1.4 GB · פנוי ‎−12.6 GB"),attentionTarget:5_000_000_000)) } }
+            if ProcessInfo.processInfo.arguments.contains("--demo-duplicates") { homeDuplicatesMinimum=10_000;DispatchQueue.main.asyncAfter(deadline:.now()+1){ [weak self] in self?.findHomeDuplicates() } } // the demo's images are small
             if ProcessInfo.processInfo.arguments.contains("--demo-homemap") { DispatchQueue.main.asyncAfter(deadline:.now()+5){ [weak self] in guard let self=self else { return };self.startMap(self.home,reuseRecent:true) } }
             mapPanel.showsPaths=false;pathLabel.isHidden=true
             if overviewMode && !ProcessInfo.processInfo.arguments.contains("--demo-overview") { setMapMode(false) } // the demo shows the file review unless asked for the overview
@@ -558,7 +561,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         item(view,L("Older Files","קבצים ישנים"),#selector(showOlderFiles),"4");item(view,L("Installers & Archives","קבצי התקנה וארכיונים"),#selector(showInstallers),"5");view.addItem(.separator())
         item(view,L("Refresh","רענן"),#selector(rescanFolder),"r");item(view,L("Stop","עצור"),#selector(cancelWork),".");view.addItem(.separator())
         item(view,L("Find","חיפוש"),#selector(focusSearch),"f");item(view,L("Preview","תצוגה מקדימה"),#selector(togglePreview),"P",[.command,.shift]);item(view,L("Keep & Next","השאר והמשך"),#selector(nextFile),"K",[.command,.shift])
-        item(view,L("Find Duplicates","מצא כפילויות"),#selector(findExactDuplicates),"d");item(view,L("Compare Images","השווה תמונות"),#selector(findSimilarImages),"D",[.command,.shift]);item(view,L("Measure All","מדוד הכול"),#selector(measureAllCommand),"m");item(view,L("Find More in Home Folder","חפש עוד בתיקיית הבית"),#selector(findMoreCommand),"M",[.command,.shift]);item(view,L("Offloaded Folders…","תיקיות שהועברו לכונן…"),#selector(showOffloaded),"O",[.command,.shift])
+        item(view,L("Find Duplicates","מצא כפילויות"),#selector(findExactDuplicates),"d");item(view,L("Compare Images","השווה תמונות"),#selector(findSimilarImages),"D",[.command,.shift]);item(view,L("Measure All","מדוד הכול"),#selector(measureAllCommand),"m");item(view,L("Find More in Home Folder","חפש עוד בתיקיית הבית"),#selector(findMoreCommand),"M",[.command,.shift]);item(view,L("Offloaded Folders…","תיקיות שהועברו לכונן…"),#selector(showOffloaded),"O",[.command,.shift]);item(view,L("Duplicates in Home Folder","כפילויות בתיקיית הבית"),#selector(findHomeDuplicates),"d",[.command,.option])
         let help=submenu(L("Help","עזרה"));item(help,L("Keyboard Shortcuts","קיצורי מקלדת"),#selector(showShortcuts),"/");NSApp.helpMenu=help
         let autoDownload=NSMenuItem(title:L("Stop WhatsApp auto-download…","עצירת הורדה אוטומטית ב־WhatsApp…"),action:#selector(openWhatsAppAutoDownload),keyEquivalent:"");autoDownload.target=self;menu.insertItem(autoDownload,at:1)
         menu.insertItem(.separator(),at:1)
@@ -654,7 +657,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     /// The standard About panel shows the bundle icon at its proper size; the version lives here, not in the title bar.
     @objc func aboutApp() {
         let credits=NSAttributedString(string:"© 2026 Daniel Siman Tov · daniel.simisi@gmail.com\n"+L("Local. Private. Yours. Nothing is deleted; files go to Trash and ⌘Z brings them back. MIT license. Not affiliated with WhatsApp or Meta.","מקומי. פרטי. שלך. שום דבר לא נמחק; קבצים עוברים לפח ו־⌘Z מחזיר אותם. רישיון MIT. ללא שיוך ל־WhatsApp או Meta."),attributes:[.font:Type.caption,.foregroundColor:NSColor.labelColor])
-        NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"Avakasha",.applicationVersion:"0.1.0 beta 16",.version:"",.credits:credits])
+        NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"Avakasha",.applicationVersion:"0.1.0 beta 17",.version:"",.credits:credits])
     }
     func show(_ title: String, _ detail: String) {
         if smokeMode { print("Alert suppressed in smoke mode: \(title) — \(detail)"); return }
@@ -704,6 +707,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let reviewingRoot = !mapMode && !overviewMode && !freeUpMode && root != nil
         highlight(sidebarOverview, overviewMode);highlight(sidebarMap, mapMode);highlight(sidebarFreeUp, freeUpMode)
         highlight(sidebarOlder, reviewingRoot && mode.indexOfSelectedItem == 3);highlight(sidebarInstallers, reviewingRoot && mode.indexOfSelectedItem == 4)
+        highlight(sidebarDuplicates, reviewingRoot && reviewSource == .homeDuplicates && mode.indexOfSelectedItem == 1)
         updateWindowSubtitle()
     }
     /// The title bar carries the brand; the subtitle says where you are, the way Finder and Mail do.
@@ -712,6 +716,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         if overviewMode { place="" }
         else if freeUpMode { place=L("Free up space","פינוי מקום") }
         else if mapMode { place=L("Storage map · ","מפת אחסון · ")+(mapRoot?.lastPathComponent ?? "") }
+        else if reviewSource == .homeDuplicates { place=L("Duplicates in your home folder","כפילויות בתיקיית הבית") }
         else { place=(root?.lastPathComponent ?? "")+(reviewSource == .largestFiles ? " · "+L("Largest files from map","הקבצים הגדולים מהמפה") : "") }
         let demo=L("Read-only demo","הדגמה לקריאה בלבד")
         window?.subtitle = demoMode ? (place.isEmpty ? demo : demo+" · "+place) : place
@@ -1162,6 +1167,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         guard !busy else { return }
         if mapMode { if let target=mapRoot { startMap(target) } }
         else if reviewSource == .largestFiles, let target=largestRoot { pendingLargestReview=true;startMap(target) }
+        else if reviewSource == .homeDuplicates { findHomeDuplicates() }
         else if let root=root { startScan(root) }
     }
     @objc func cancelWork() { guard busy, cancellable else { return };token.cancel();status.stringValue=L("Stopping… keeping what was found","עוצרים… מה שנמצא נשמר");cancelButton.isEnabled=false;rescanButton.isEnabled=false;announce(L("Stopped · partial results kept","נעצר · תוצאות חלקיות נשמרו")) }
@@ -1376,6 +1382,36 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         if mapStale { status.stringValue = L("Changed since measured · Refresh · ","השתנה מאז המדידה · רענן · ")+status.stringValue }
         if !shown.isEmpty { table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false);table.scrollRowToVisible(0) }
         window.makeFirstResponder(table)
+    }
+    /// Identical files anywhere in the home folder, as one review list in the duplicates view: the same keeper rules, the same
+    /// re-check before moving, and nothing selected until you ask for extra copies.
+    var homeDuplicatesMinimum: Int64 = HomeDuplicates.defaultMinimumBytes
+    @objc func findHomeDuplicates() {
+        guard !busy, demoHomeIsSafe, let base=try? FileSafety.root(home) else { return }
+        token=CancellationToken();let jobToken=token;let minimum=homeDuplicatesMinimum;setBusy(true);hideFeedback()
+        status.stringValue=L("Looking for identical files in your home folder… names and sizes first","מחפשים קבצים זהים בתיקיית הבית… קודם שמות וגדלים")
+        work.async {
+            var last=Date.distantPast
+            let result=Result{ try HomeDuplicates.find(in:base,minimumBytes:minimum,token:jobToken){ step in
+                guard Date().timeIntervalSince(last) > 0.25 else { return };last=Date()
+                DispatchQueue.main.async { self.status.stringValue=L("Looking for identical files · ","מחפשים קבצים זהים · ")+step }
+            } }
+            DispatchQueue.main.async {
+                self.setBusy(false)
+                guard case .success(let found)=result else { self.status.stringValue=jobToken.isCancelled ? L("Stopped · nothing listed","נעצר · לא הוצג דבר") : L("The home folder could not be searched","לא ניתן היה לחפש בתיקיית הבית");return }
+                if self.overviewMode { self.setOverview(false) };if self.freeUpMode { self.setFreeUp(false) };if self.mapMode { self.setMapMode(false) }
+                self.activateRoot(base);self.reviewSource = .homeDuplicates
+                var seen=Set<String>();self.files=found.groups.flatMap(\.members).filter{ seen.insert($0.id).inserted }
+                self.exact=found.groups;self.similar=[];self.guards=[:];self.chatFilter.removeAllItems();self.primary.previewItem=nil;self.comparison.previewItem=nil;self.stopVideo()
+                self.mode.selectItem(at:1);self.sizeFilter.selectItem(at:0);self.kindFilter.selectItem(at:0);self.search.stringValue="";self.sortPicker.selectItem(at:ReviewSort.largest.rawValue);self.changeSort();self.modeChanged()
+                self.headingLabel.stringValue=L("Duplicates","כפילויות");self.setFolderLabel(self.demoMode ? L("Example home folder · duplicates","תיקיית בית לדוגמה · כפילויות") : base.path+" · "+L("duplicates across the home folder","כפילויות בכל תיקיית הבית"),path:!self.demoMode)
+                let extra=HomeDuplicates.extraBytes(found.groups)
+                self.status.stringValue = found.groups.isEmpty ? L("No identical files of 1 MB or more outside Library","לא נמצאו קבצים זהים של ‎1MB ומעלה מחוץ ל־Library")
+                    : "\(found.groups.count) "+L("groups","קבוצות")+" · "+bytes(extra)+L(" in extra copies · nothing selected: Select extra copies keeps one of each"," בעותקים נוספים · שום דבר לא נבחר: ״בחר עותקים נוספים״ משאיר אחד מכל קבוצה")
+                if found.skipped > 0 { self.status.stringValue += " · \(found.skipped) "+L("could not be read","לא ניתן היה לקרוא") }
+                self.updateLocationHighlight();if !self.shown.isEmpty { self.table.selectRowIndexes(IndexSet(integer:0),byExtendingSelection:false);self.table.scrollRowToVisible(0) };self.window.makeFirstResponder(self.table)
+            }
+        }
     }
     func revealFolder(_ url:URL) { NSWorkspace.shared.activateFileViewerSelecting([url]) }
     var currentGroups: [DuplicateGroup] {mode.indexOfSelectedItem == 1 ? exact : (mode.indexOfSelectedItem == 2 ? similar : [])}
@@ -2174,6 +2210,19 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             let scores=freeUpPanel.topSteps().map{ Double($0.measurement!.bytes)*FreeUpPanel.weight($0) };precondition(scores == scores.sorted(by:>),"Steps are ranked by size times safety")
             overviewPanel.onStep?(steps[0]);precondition(freeUpMode && freeUpPanel.selectedRow?.location.id == steps[0],"A step opens Free up space on its row");settle()
             precondition(freeUpPanel.caveatText.hasPrefix(L("System Data","נתוני")),"The System Data line names this drive's purgeable space and snapshots, or says what else System Data counts")
+            // Duplicates across the home folder: copies in different folders found; Library, hidden folders and bundles never searched;
+            // the list opens in the duplicates view, nothing selected until Select extra copies keeps one of each.
+            let reviewRootBefore=root!, filesBefore=files
+            let copyData=Data((0..<40_000).map{ UInt8(truncatingIfNeeded:$0 &* 13) })
+            for path in ["Documents/Report.pdf","Downloads/Report (1).pdf","Desktop/Old/Report.pdf","Library/Caches/app/Report.pdf",".cache/Report.pdf"] {
+                let url=fakeHome.appendingPathComponent(path);try FileManager.default.createDirectory(at:url.deletingLastPathComponent(),withIntermediateDirectories:true);try copyData.write(to:url)
+            }
+            homeDuplicatesMinimum=10_000;findHomeDuplicates();precondition(busy,"The duplicates search runs as a job");settle()
+            let dupNames=Set(files.map{ $0.url.path.replacingOccurrences(of:homeRoot.path+"/",with:"") })
+            precondition(reviewSource == .homeDuplicates && root?.path == homeRoot.path && mode.indexOfSelectedItem == 1 && exact.count == 1 && dupNames == ["Documents/Report.pdf","Downloads/Report (1).pdf","Desktop/Old/Report.pdf"] && sidebarDuplicates.contentTintColor == .controlAccentColor && table.selectedRowIndexes.count <= 1,"Home duplicates: \(dupNames)")
+            selectExtras();precondition(selectedFiles.count == 2 && guards.count == 2 && !selectedFiles.contains{ $0.id == exact[0].keeper.id },"Select extra copies keeps one of each")
+            for path in ["Documents/Report.pdf","Downloads/Report (1).pdf","Desktop/Old","Library/Caches/app",".cache"] { try FileManager.default.removeItem(at:fakeHome.appendingPathComponent(path)) }
+            homeDuplicatesMinimum=HomeDuplicates.defaultMinimumBytes;activateRoot(reviewRootBefore);files=filesBefore;reviewSource = .scan;exact=[];guards=[:];mode.selectItem(at:0);modeChanged();setFreeUp(true);settle()
             // Move to drive: a folder that stands in for an external drive; copy and check every file, original to Trash, Undo, bring back beside it.
             let oldProject=fakeHome.appendingPathComponent("Documents/Old project",isDirectory:true),stand=temp.appendingPathComponent("drive/Avakasha Offload",isDirectory:true)
             try FileManager.default.createDirectory(at:oldProject.appendingPathComponent("Footage"),withIntermediateDirectories:true)
@@ -2237,7 +2286,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(preferences.bool(forKey:"AppleTextDirection"),"Hebrew must switch the layout direction")
             chooseLanguage(languageItems[0]);precondition(preferences.stringArray(forKey:"AppleLanguages") == ["en"] && !preferences.bool(forKey:"AppleTextDirection"))
             precondition(isCurrentRoot(root!) && !isCurrentRoot(temp.appendingPathComponent("map")),"Clicking the loaded location again must not rescan")
-            print("UI smoke: storage map, largest files, installers, reviewed marks, session space summary, free-up search, overview steps, move to drive, weekly check, space guard, selection, old-file sorting, preview, confirmation preference, Delete, Undo, Redo, blocked-restore retry and held-key protection passed. No real files changed; no windows shown.")
+            print("UI smoke: storage map, largest files, installers, reviewed marks, session space summary, free-up search, overview steps, home duplicates, move to drive, weekly check, space guard, selection, old-file sorting, preview, confirmation preference, Delete, Undo, Redo, blocked-restore retry and held-key protection passed. No real files changed; no windows shown.")
             cleanup();fflush(stdout);exit(0)
         } catch { fputs("UI smoke failed: \(error)\n",stderr);cleanup();exit(1) }
     }

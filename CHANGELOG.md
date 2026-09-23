@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.0-beta.17
+
+- **Duplicates** (sidebar, or View › Duplicates in Home Folder, ⌥⌘D): identical files anywhere in your home folder, such as the same video in Downloads, Desktop and a project folder. Library (which also holds iCloud Drive and app data), hidden folders, bundles such as the Photos library, Trash, cloud placeholders and links are never searched, and only files of 1 MB or more are compared. Candidates are found by size and a quick fingerprint of the first and last 64 KB; the verdict is a full SHA-256 comparison, and hard links are never counted as copies.
+- The results open in the duplicates view with the home folder as the root: nothing is selected until you press Select extra copies, which keeps one of each group (never a starred file), and every move goes through the usual checks, confirmation and Undo. Refresh searches again.
+
 ## 0.1.0-beta.16
 
 - **Move to Drive…** (storage map toolbar, and Free up space for folders untouched for months): make room without deciding what to delete. After one confirmation (Cancel by default), Avakasha copies the folder to "Avakasha Offload" on an external drive, checks every file against its original with SHA-256, confirms the original did not change while it was copied, and only then moves the original to Trash through the usual guarded folder move. ⌘Z brings the original back; the copy stays on the drive. Folders holding links, special files, cloud placeholders or another drive are refused before anything is copied, and a failed or stopped copy leaves nothing behind on the drive.
