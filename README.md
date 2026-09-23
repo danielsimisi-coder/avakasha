@@ -7,23 +7,51 @@
   <img alt="Beta" src="https://img.shields.io/badge/status-beta-d8a354">
 </p>
 
-<p align="center"><strong>Avakasha (Sanskrit avakāśa: room, open space) makes room on your Mac.</strong><br>See what fills it, review it with your eyes and your keyboard, and decide what stays.<br>Map a folder or drive. Open the folder that takes the space. Preview each file. Keep it or move it to Trash. Continue.</p>
+<h2 align="center">Make room. Lose nothing.</h2>
 
-<p align="center"><a href="https://github.com/danielsimisi-coder/avakasha/releases">Releases</a> · <a href="docs/DISTRIBUTION.md">Build from source</a> · <a href="docs/PRIVACY.md">Privacy</a> · <a href="docs/SAFETY.md">Safety</a></p>
+<p align="center"><strong>Avakasha</strong> (Sanskrit <em>avakāśa</em>: room, open space) keeps free space on your Mac.<br>It shows what grows, warns you before the disk fills, and makes room the safe way:<br>nothing is deleted behind your back, every move is confirmed and can be undone,<br>and whatever you are unsure about can go to a drive, checked file by file.</p>
 
-## Your Mac is full. But full of what?
+<p align="center"><a href="https://github.com/danielsimisi-coder/avakasha/releases">Download the beta</a> · <a href="docs/DISTRIBUTION.md">Build from source</a> · <a href="docs/PRIVACY.md">Privacy</a> · <a href="docs/SAFETY.md">Safety</a></p>
 
-Avakasha was born from a recurring frustration: **storage keeps filling up, you do not know where the space has gone, and the Mac’s built-in tools do not give you a clear, convenient way to work through the problem.**
+## The promise
 
-A storage total tells you that you have a problem. A folder full of unfamiliar filenames still leaves the hard part: finding the large files, seeing what they actually contain, and deciding what you can let go of without losing something important.
+**Room when you need it.**
+- Choose how much free space to keep. Avakasha shows what grew this week and when, at this pace, you will run out.
+- Ask for room ("I need 30 GB") and get a plan: the fewest folders that get you there, starting with what apps rebuild on their own.
+- Before the disk fills, one notification opens that plan. You confirm once, and it is done.
 
-The first pile we tackled was accumulated WhatsApp media: old videos, repeated images and forgotten attachments mixed with useful files and client material. But WhatsApp was one example of the broader problem. Downloads, Movies and external drives can build up the same way.
+**Nothing lost.**
+- Nothing is ever deleted permanently. Everything goes to Trash, and ⌘Z brings it back.
+- Every folder is checked and measured again right before it moves, and the confirmation always defaults to Cancel.
+- Not sure? **Move it to a drive**: every file is copied and verified with SHA-256 before the original goes to Trash, and a manifest stays with the copy.
+- Commands for developer tools are copied for you to run, never run by the app.
 
-Avakasha makes the review practical. Choose a folder or drive, sort by size, and work through the files: **Space to preview, Delete to move to Trash, ↓ to continue.** Older-file filters and duplicate suggestions help narrow the pile; Undo helps recover from a mistaken move. You decide what matters.
+**Nothing hidden.**
+- Every item says what it is, what happens next time the app runs, and what you lose if it goes.
+- Everything runs on your Mac. To find space, Avakasha reads names, sizes and dates; it opens file contents only when you ask for something that needs them: a preview, a duplicate check, a copy to a drive.
+- Open source, MIT, no account, no telemetry.
 
-**No WhatsApp account connection. No cloud analysis. No automatic permanent deletion.** Avakasha reviews your chosen location; it does not read conversations or identify client files.
+## How it works
 
-In one sentence: Avakasha is a Mac app that helps you free up space by showing what is actually filling your computer, from WhatsApp media to Downloads, Movies and external drives, so you can see it and decide what stays.
+1. **Set a floor.** On the overview, choose how much free space to keep (20, 40, 60 or 100 GB).
+2. **See what grows.** Avakasha keeps a small local history and shows it plainly: "Since 16 Sep: Xcode DerivedData +7.2 GB · Downloads +1.4 GB".
+3. **Get a plan.** When the floor is near (or whenever you ask), it selects the safest rows that free enough: caches, build products and model downloads the owning apps recreate.
+4. **Confirm once.** One dialog lists every folder, with Cancel as the default. One ⌘Z undoes it all.
+5. **Keep what you are unsure about, somewhere else.** Old projects and folders untouched for months can go to an external drive instead, verified, and come back with Bring Back.
+
+Also inside: a storage map of any folder or drive, a search for build and cache folders, data left by apps you removed, and folders untouched for months; a plain explanation of System Data; fast keyboard review with previews; WhatsApp media by chat; exact duplicates; English and Hebrew.
+
+**What it does not promise.** It cannot shrink what macOS keeps for itself (local snapshots, purgeable space); it explains them instead. The watch runs while Avakasha is open (keep it in the menu bar and open at login). Once you empty Trash, a folder moved to a drive exists only on that drive. This is a beta, ad-hoc signed and not yet notarized.
+
+![Overview: drives, keep free space, what can go and where to start; generated demo data](assets/avakasha-overview.png)
+
+## Why it exists
+
+Avakasha was born from a recurring frustration: **storage keeps filling up, you do not know where the space has gone, and the Mac’s built-in tools do not give you a clear, convenient way to work through the problem.** A storage total tells you that you have a problem; a folder full of unfamiliar names still leaves the hard part, deciding what can go without losing something important. The first pile was WhatsApp media, old videos and repeated images mixed with client material, but Downloads, Movies, developer caches and external drives fill up the same way. Most tools either show you a chart or delete things for you. Avakasha keeps the decision yours, and makes it quick and safe.
+
+**No WhatsApp account connection. No cloud analysis. No automatic permanent deletion.**
+
+## In detail
 
 **Overview.** The app opens on an overview: each local disk with used, total and free space and a share bar, **What can go**, what this session has moved to Trash so far, and ways to start (Free up space, map the home folder, map a folder or drive). What can go shows what Free up space measured: how much can go to Trash now, how much needs an app, Terminal or a review, and the five most worthwhile steps, ranked by size weighted by how safe each step is; click one to jump to it. Before anything is measured it offers **Check what can go** and measures nothing by itself. The Trash section shows what is in Trash when Free up space could measure it, with **Open Trash**. Each drive card also names the part of System Data you cannot move to Trash: purgeable space macOS frees by itself, and local snapshots (Time Machine's counted separately, with the newest date and a **Time Machine Settings…** button). Snapshot sizes need administrator rights, so only counts and dates are shown.
 
@@ -32,8 +60,6 @@ In one sentence: Avakasha is a Mac app that helps you free up space by showing w
 **Move to a drive.** When you would rather not decide what to delete, **Move to Drive…** (in the storage map, and in Free up space for folders untouched for months) copies a folder to "Avakasha Offload" on an external drive, checks every file against its original with SHA-256, and only then moves the original to Trash; ⌘Z brings it back and the copy stays on the drive with a manifest listing every file. **View › Offloaded Folders…** lists what went where and brings a folder back, checked against the manifest, without ever overwriting. File contents are verified byte for byte; metadata such as tags is copied but not compared. Once Trash is emptied, the drive holds the only copy, so keep it safe (or back it up).
 
 **Menu bar and weekly check.** In the Avakasha menu, **Show in Menu Bar** puts the startup disk's free space in the menu bar, with a menu for every drive, what can go to Trash now, Check What Can Go… and Open Avakasha; closing the window then keeps Avakasha running. **Weekly Check & Low-Space Alerts** (off by default) measures the rebuildable known locations once a week while Avakasha is open and sends a local notification when at least 2 GB can go to Trash and it grew since the last check, plus at most one alert a day when the startup disk runs low (under 15 GB free, or under 10% on a smaller disk). It never moves anything. **Open at Login** keeps it running after a restart. The numbers come from volume attributes only; nothing inside a volume is listed until you choose a location. Free space is what you can still write, so Trash does not count as free until you empty it. The sidebar highlights the view you are in: Overview, Storage map, Free up space, Older files, Installers or the loaded location.
-
-![Overview: drives, keep free space, what can go and where to start; generated demo data](assets/avakasha-overview.png)
 
 ## Where is the space?
 
