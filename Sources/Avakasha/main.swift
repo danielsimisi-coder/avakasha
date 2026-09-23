@@ -364,6 +364,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         overviewPanel.onContinue={[weak self] in self?.resumeFolder()}
         previewHostView=previewHost
         mapPanel.onTrashFolder={[weak self] node in self?.trashFolderFromMap(node)}
+        mapPanel.onOffloadFolder={[weak self] node in guard let self=self, let root=self.mapRoot else { return };self.offloadFolder(node.url,root:root,allowHiddenAncestors:false,title:node.name){ [weak self] in self?.mapFolderGone(node) }}
         freeUpPanel.translatesAutoresizingMaskIntoConstraints=false;listHost.addSubview(freeUpPanel,positioned:.below,relativeTo:emptyList);freeUpPanel.isHidden=true
         NSLayoutConstraint.activate([freeUpPanel.leadingAnchor.constraint(equalTo:listHost.leadingAnchor,constant:16),freeUpPanel.trailingAnchor.constraint(equalTo:listHost.trailingAnchor,constant:-16),freeUpPanel.topAnchor.constraint(equalTo:listHost.topAnchor,constant:16),freeUpPanel.bottomAnchor.constraint(equalTo:listHost.bottomAnchor)])
         previewHost.addSubview(freeUpPanel.detail);freeUpPanel.detail.translatesAutoresizingMaskIntoConstraints=false;freeUpPanel.detail.isHidden=true
@@ -376,6 +377,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         freeUpPanel.onCopyCommand={[weak self] command in NSPasteboard.general.clearContents();NSPasteboard.general.setString(command,forType:.string);self?.status.stringValue=L("Command copied · paste it in Terminal","הפקודה הועתקה · מדביקים אותה ב־Terminal")}
         freeUpPanel.onSelectionChange={[weak self] in self?.updateEnabled()}
         freeUpPanel.onFind={[weak self] in self?.findMore()}
+        freeUpPanel.onMoveToDrive={[weak self] location in
+            guard let self=self, let base=try? FileSafety.root(self.freeUpPanel.home) else { return }
+            self.offloadFolder(location.url(home:base),root:base,allowHiddenAncestors:true,title:LocationTexts.text(for:location).title){ [weak self] in self?.freeUpPanel.markMoved(location) }
+        }
         previewHost.addSubview(mapPanel.detail);mapPanel.detail.translatesAutoresizingMaskIntoConstraints=false;mapPanel.detail.isHidden=true
         NSLayoutConstraint.activate([mapPanel.detail.leadingAnchor.constraint(equalTo:previewHost.leadingAnchor,constant:20),mapPanel.detail.trailingAnchor.constraint(equalTo:previewHost.trailingAnchor,constant:-20),mapPanel.detail.topAnchor.constraint(equalTo:previewHost.topAnchor,constant:16)])
         let split=NSSplitView();split.isVertical=true;split.dividerStyle = .thin;split.addArrangedSubview(listHost);split.addArrangedSubview(previewHost)
@@ -553,7 +558,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         item(view,L("Older Files","קבצים ישנים"),#selector(showOlderFiles),"4");item(view,L("Installers & Archives","קבצי התקנה וארכיונים"),#selector(showInstallers),"5");view.addItem(.separator())
         item(view,L("Refresh","רענן"),#selector(rescanFolder),"r");item(view,L("Stop","עצור"),#selector(cancelWork),".");view.addItem(.separator())
         item(view,L("Find","חיפוש"),#selector(focusSearch),"f");item(view,L("Preview","תצוגה מקדימה"),#selector(togglePreview),"P",[.command,.shift]);item(view,L("Keep & Next","השאר והמשך"),#selector(nextFile),"K",[.command,.shift])
-        item(view,L("Find Duplicates","מצא כפילויות"),#selector(findExactDuplicates),"d");item(view,L("Compare Images","השווה תמונות"),#selector(findSimilarImages),"D",[.command,.shift]);item(view,L("Measure All","מדוד הכול"),#selector(measureAllCommand),"m");item(view,L("Find More in Home Folder","חפש עוד בתיקיית הבית"),#selector(findMoreCommand),"M",[.command,.shift])
+        item(view,L("Find Duplicates","מצא כפילויות"),#selector(findExactDuplicates),"d");item(view,L("Compare Images","השווה תמונות"),#selector(findSimilarImages),"D",[.command,.shift]);item(view,L("Measure All","מדוד הכול"),#selector(measureAllCommand),"m");item(view,L("Find More in Home Folder","חפש עוד בתיקיית הבית"),#selector(findMoreCommand),"M",[.command,.shift]);item(view,L("Offloaded Folders…","תיקיות שהועברו לכונן…"),#selector(showOffloaded),"O",[.command,.shift])
         let help=submenu(L("Help","עזרה"));item(help,L("Keyboard Shortcuts","קיצורי מקלדת"),#selector(showShortcuts),"/");NSApp.helpMenu=help
         let autoDownload=NSMenuItem(title:L("Stop WhatsApp auto-download…","עצירת הורדה אוטומטית ב־WhatsApp…"),action:#selector(openWhatsAppAutoDownload),keyEquivalent:"");autoDownload.target=self;menu.insertItem(autoDownload,at:1)
         menu.insertItem(.separator(),at:1)
@@ -641,6 +646,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         case #selector(showInFinderCommand): return !busy && (mapMode ? mapPanel.current != nil : (freeUpMode ? freeUpPanel.revealButton.isEnabled : focusedFile != nil))
         case #selector(moveToTrashCommand): return !busy && !demoMode && (mapMode ? mapPanel.trashableFolder != nil : (freeUpMode ? freeUpPanel.trashButton.isEnabled : (root != nil && !selectedFiles.isEmpty)))
         case #selector(toggleMenuBar(_:)),#selector(toggleWeeklyCheck(_:)),#selector(toggleOpenAtLogin(_:)),#selector(chooseFloor(_:)): return !demoMode
+        case #selector(showOffloaded): return !demoMode
         case #selector(forgetHistoryCommand): return !demoMode && FileManager.default.fileExists(atPath:historyURL.path)
         default: return true
         }
@@ -648,7 +654,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     /// The standard About panel shows the bundle icon at its proper size; the version lives here, not in the title bar.
     @objc func aboutApp() {
         let credits=NSAttributedString(string:"© 2026 Daniel Siman Tov · daniel.simisi@gmail.com\n"+L("Local. Private. Yours. Nothing is deleted; files go to Trash and ⌘Z brings them back. MIT license. Not affiliated with WhatsApp or Meta.","מקומי. פרטי. שלך. שום דבר לא נמחק; קבצים עוברים לפח ו־⌘Z מחזיר אותם. רישיון MIT. ללא שיוך ל־WhatsApp או Meta."),attributes:[.font:Type.caption,.foregroundColor:NSColor.labelColor])
-        NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"Avakasha",.applicationVersion:"0.1.0 beta 15",.version:"",.credits:credits])
+        NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"Avakasha",.applicationVersion:"0.1.0 beta 16",.version:"",.credits:credits])
     }
     func show(_ title: String, _ detail: String) {
         if smokeMode { print("Alert suppressed in smoke mode: \(title) — \(detail)"); return }
@@ -899,11 +905,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     /// Whole-folder move from the storage map.
     func trashFolderFromMap(_ node:StorageNode,confirmed:Bool=false) {
         guard !busy, let target=mapRoot else { return }
-        trashFolder(node.url,root:target,title:node.name,explanation:nil,confirmed:confirmed) { [weak self] in
-            guard let self=self else { return }
-            self.mapPanel.remove(node);self.mapStale=true;self.mapPanel.setStale(true)
-            let prefix=node.url.path+"/";if self.files.contains(where:{ $0.id.hasPrefix(prefix) }) { self.files.removeAll{ $0.id.hasPrefix(prefix) };self.exact=[];self.similar=[];self.guards=[:] };if !self.mapMode { self.applyFilters() }
-        }
+        trashFolder(node.url,root:target,title:node.name,explanation:nil,confirmed:confirmed) { [weak self] in self?.mapFolderGone(node) }
+    }
+    /// A folder left the map (Trash or a drive): drop it from the map and from any file list that came from it.
+    func mapFolderGone(_ node:StorageNode) {
+        mapPanel.remove(node);mapStale=true;mapPanel.setStale(true)
+        let prefix=node.url.path+"/";if files.contains(where:{ $0.id.hasPrefix(prefix) }) { files.removeAll{ $0.id.hasPrefix(prefix) };exact=[];similar=[];guards=[:] };if !mapMode { applyFilters() }
     }
     /// The one path every whole-folder move takes: check, measure again, confirm with fresh numbers, move with identity checks, record for Undo.
     /// Wording for the core's folder refusals, in the interface language.
@@ -929,6 +936,163 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     /// Test hook: nil asks the user, true or false answers the folder confirmation without a dialog.
     var folderConfirmationOverride: Bool?
+
+    // MARK: Move to drive
+    /// Test hooks: a folder that stands in for an external drive (same disk, so the test allows it) and a temporary index.
+    var offloadDestinationOverride: URL?
+    var offloadIndexOverride: URL?
+    var offloadIndexURL: URL { offloadIndexOverride ?? (smokeMode ? FileManager.default.temporaryDirectory.appendingPathComponent("avakasha-smoke-offload.json") : FileManager.default.urls(for:.applicationSupportDirectory,in:.userDomainMask)[0].appendingPathComponent("Avakasha/offload-index.json")) }
+    func offloadRecords() -> [OffloadRecord] { OffloadIndex.load(from:offloadIndexURL) }
+    lazy var offloadWindow: OffloadWindowController = {
+        let c=OffloadWindowController()
+        c.onShow={ r in NSWorkspace.shared.activateFileViewerSelecting([URL(fileURLWithPath:r.destinationPath)]) }
+        c.onBringBack={ [weak self] r in self?.bringBack(r) }
+        return c
+    }()
+    @objc func showOffloaded() { offloadWindow.records=offloadRecords();offloadWindow.showWindow(nil);offloadWindow.window?.center();offloadWindow.window?.makeKeyAndOrderFront(nil) }
+    func offloadErrorText(_ error:Error) -> String {
+        switch error as? OffloadError {
+        case .unsupportedItem(let item)?: return L("It holds an item that cannot be copied faithfully (a link or a special file): ","היא מכילה פריט שאי אפשר להעתיק בנאמנות (קישור או קובץ מיוחד): ")+item+". "+L("Review its files instead.","אפשר לסקור את הקבצים שלה במקום.")
+        case .notFullyLocal(let item)?: return L("Part of it is not on this Mac or could not be read: ","חלק ממנה לא נמצא ב־Mac הזה או שלא ניתן לקרוא אותו: ")+item+"."
+        case .sameDrive?: return L("The drive is the same disk the folder is on.","הכונן הוא אותו דיסק שעליו נמצאת התיקייה.")
+        case .notEnoughSpace(let needed,let available)?: return L("The drive needs ","בכונן צריך ")+bytes(needed)+L(" free and has ",", ויש בו ")+bytes(available)+"."
+        case .copyFailed(let item)?: return L("Copying failed at ","ההעתקה נכשלה ב־")+item+L(". The drive may be full, disconnected or formatted in a way that cannot hold this file.",". ייתכן שהכונן מלא, נותק או מפורמט באופן שלא יכול להכיל את הקובץ.")
+        case .verifyFailed(let item)?: return L("A copy did not match its original: ","עותק לא תאם את המקור: ")+item+L(". The drive may be failing.",". ייתכן שהכונן תקול.")
+        case .sourceChanged?: return L("The folder changed while it was being copied. Close apps that use it and try again.","התיקייה השתנתה בזמן ההעתקה. סוגרים אפליקציות שמשתמשות בה ומנסים שוב.")
+        case .manifestMissing?: return L("The copy on the drive has no manifest, so it cannot be checked.","לעותק בכונן אין מניפסט, ולכן אי אפשר לבדוק אותו.")
+        case .cancelled?: return L("Stopped.","נעצר.")
+        case nil: return error.localizedDescription
+        }
+    }
+    /// Copies a folder to another drive, checks every file, then moves the original to Trash through the guarded folder move.
+    /// One confirmation up front, Cancel by default; ⌘Z brings the original back; the copy on the drive stays and is listed in Offloaded Folders.
+    func offloadFolder(_ folder:URL,root:URL,allowHiddenAncestors:Bool,title:String,onMoved:@escaping ()->Void) {
+        guard !busy, !demoMode else { return }
+        let expected:FolderIdentity
+        do { expected=try FolderTrash.check(folder,root:root,allowHiddenAncestors:allowHiddenAncestors) }
+        catch { show(L("This folder cannot be moved to a drive","לא ניתן להעביר את התיקייה הזו לכונן"),folderErrorText(error));return }
+        let destinations:[(name:String,uuid:String?,parent:URL,free:Int64)] = offloadDestinationOverride.map{ [(L("Test drive","כונן בדיקה"),nil,$0,Int64.max)] }
+            ?? Volumes.offloadDestinations(for:folder).map{ ($0.name,$0.uuid,$0.url.appendingPathComponent(Offloader.folderName,isDirectory:true),$0.available) }
+        guard !destinations.isEmpty else {
+            show(L("No drive to move to","אין כונן להעביר אליו"),L("Connect an external drive with enough free space and try again. Avakasha copies the folder there, checks every file, and only then moves the original to Trash.","מחברים כונן חיצוני עם מספיק מקום ומנסים שוב. Avakasha מעתיקה לשם את התיקייה, בודקת כל קובץ, ורק אז מעבירה את המקור לפח."));return
+        }
+        token=CancellationToken();let jobToken=token;setBusy(true);hideFeedback();status.stringValue=L("Checking what ","בודקים מה יש ב־")+title+L(" holds…","…")
+        work.async {
+            let found=Result{ try Offloader.inventory(of:folder,token:jobToken) }
+            DispatchQueue.main.async {
+                self.setBusy(false)
+                let inventory:OffloadInventory
+                switch found {
+                case .success(let value): inventory=value
+                case .failure(let error): if (error as? OffloadError) == .cancelled { self.status.stringValue=L("Stopped · nothing moved","נעצר · שום דבר לא הועבר") } else { self.show(L("Not moved","לא הועבר"),self.offloadErrorText(error)) };return
+                }
+                var chosen=0
+                let approved:Bool
+                if let override=self.folderConfirmationOverride { approved=override } else if self.smokeMode { approved=true }
+                else {
+                    let a=NSAlert();a.alertStyle = .critical
+                    a.messageText=L("Move “","להעביר את ״")+title+(destinations.count == 1 ? L("” to ","״ אל ")+destinations[0].name+"?" : L("” to a drive?","״ לכונן?"))
+                    a.informativeText=bytes(inventory.bytes)+" · \(inventory.files.count) "+L("files","קבצים")+"\n\n"+L("Avakasha copies every file to “Avakasha Offload” on the drive, checks each copy against its original (SHA-256), and only then moves the original to Trash. ⌘Z brings the original back; the copy stays on the drive.\n\nOnce you empty Trash, the drive holds the only copy: keep it safe.","Avakasha מעתיקה כל קובץ לתיקייה ״Avakasha Offload״ בכונן, בודקת כל עותק מול המקור (SHA-256), ורק אז מעבירה את המקור לפח. ‏⌘Z מחזיר את המקור; העותק נשאר בכונן.\n\nאחרי ריקון הפח, בכונן נמצא העותק היחיד: שומרים עליו.")
+                    let popup=NSPopUpButton(frame:NSRect(x:0,y:0,width:320,height:26))
+                    if destinations.count > 1 { for d in destinations { popup.addItem(withTitle:d.name+" · "+bytes(d.free)+L(" free"," פנויים")) };a.accessoryView=popup }
+                    let move=a.addButton(withTitle:L("Move to Drive","העבר לכונן"));let cancel=a.addButton(withTitle:L("Cancel","ביטול"))
+                    move.keyEquivalent="";cancel.keyEquivalent="\r";move.hasDestructiveAction=true
+                    approved = a.runModal() == .alertFirstButtonReturn;chosen=max(0,popup.indexOfSelectedItem)
+                }
+                guard approved else { self.status.stringValue=L("Nothing moved","שום דבר לא הועבר");return }
+                let destination=destinations[chosen], sameDriveAllowed=self.offloadDestinationOverride != nil
+                self.token=CancellationToken();let copyToken=self.token;self.setBusy(true)
+                self.status.stringValue=L("Copying to ","מעתיקים אל ")+destination.name+"…"
+                let acting=self.historyFor(root), backend=self.trashBackend
+                self.work.async {
+                    var last=Date.distantPast
+                    let copied=Result{ try Offloader.copy(folder,into:destination.parent,allowSameDrive:sameDriveAllowed,token:copyToken){ done,total in
+                        guard Date().timeIntervalSince(last) > 0.25 else { return };last=Date()
+                        DispatchQueue.main.async { self.status.stringValue=L("Copying and checking: ","מעתיקים ובודקים: ")+bytes(done/3)+L(" of "," מתוך ")+bytes(total/3)+" · "+destination.name+" · "+L("Esc stops; the original is not touched","Esc עוצר; המקור לא נפגע") }
+                    } }
+                    // Straight on, with no pause in between: Esc is honoured up to this point, then the original moves while the checked copy is fresh.
+                    var moved:FolderMoveResult?, stoppedAfterCopy=false, changedInTrash=false
+                    if case .success(let copy)=copied {
+                        // Once more, immediately before the move: the original must still be exactly what was copied.
+                        if copyToken.isCancelled || Offloader.matches(folder,copy.inventory) != true { stoppedAfterCopy=true }
+                        else {
+                            DispatchQueue.main.sync { self.setBusy(true,cancellable:false) } // from here on Esc is not offered: the move is under way
+                            moved=acting.moveFolder(folder,root:root,expected:expected,bytes:copy.inventory.bytes,allowHiddenAncestors:allowHiddenAncestors,backend:backend)
+                            // Best effort afterwards: if the folder in Trash can be read and differs, say so. Unreadable is not a difference.
+                            if let trashed=moved?.ticket?.trashed { changedInTrash = Offloader.matches(trashed,copy.inventory) == false }
+                        }
+                    }
+                    DispatchQueue.main.async {
+                        self.setBusy(false)
+                        let copy:(folder:URL,manifest:OffloadManifest,inventory:OffloadInventory)
+                        switch copied {
+                        case .success(let value): copy=value
+                        case .failure(let error):
+                            if (error as? OffloadError) == .cancelled { self.status.stringValue=L("Stopped · the original was not touched","נעצר · המקור לא נפגע") }
+                            else { self.show(L("Not moved","לא הועבר"),self.offloadErrorText(error)+"\n"+L("The original was not touched.","המקור לא נפגע.")) }
+                            return
+                        }
+                        // The checked copy exists either way, so it is always listed.
+                        var records=self.offloadRecords()
+                        records.insert(OffloadRecord(name:folder.lastPathComponent,originalPath:folder.path,destinationPath:copy.folder.path,volumeName:destination.name,volumeUUID:destination.uuid,date:Date(),bytes:copy.inventory.bytes,files:copy.inventory.files.count),at:0)
+                        try? OffloadIndex.save(records,to:self.offloadIndexURL);self.offloadWindow.records=records
+                        if stoppedAfterCopy {
+                            let text=L("The checked copy is on ","העותק הבדוק נמצא ב־")+destination.name+L("; the original was not moved","; המקור לא הועבר")
+                            if copyToken.isCancelled { self.status.stringValue=L("Stopped · ","נעצר · ")+text } else { self.show(L("The folder changed while it was copied","התיקייה השתנתה בזמן ההעתקה"),text+". "+L("Close apps that use it and try again.","סוגרים אפליקציות שמשתמשות בה ומנסים שוב.")) }
+                            return
+                        }
+                        guard let moved=moved else { return }
+                        if moved.ticket != nil {
+                            onMoved();self.spaceChanged();self.updateSpaceLabel();self.updateEnabled()
+                            let text=title+" · "+L("copied to ","הועתק אל ")+destination.name+L(", checked · original in Trash",", נבדק · המקור בפח")
+                            self.status.stringValue=text+" · "+L("Undo with ⌘Z","ביטול עם ⌘Z");self.showFeedback(text,undoable:true)
+                            if changedInTrash {
+                                self.show(L("The folder changed at the last moment","התיקייה השתנתה ברגע האחרון"),L("Something in it changed just before it went to Trash, so the copy on ","משהו בה השתנה רגע לפני שעברה לפח, ולכן ייתכן שבעותק ב־")+destination.name+L(" may not have the latest version. Press ⌘Z to put the original back, then try again."," אין את הגרסה האחרונה. לוחצים ⌘Z כדי להחזיר את המקור, ומנסים שוב."))
+                            }
+                        } else {
+                            let stillThere=FileManager.default.fileExists(atPath:folder.path)
+                            self.show(L("Copied, but the original was not moved to Trash","הועתק, אבל המקור לא הועבר לפח"),L("The checked copy is on ","העותק הבדוק נמצא ב־")+destination.name+". "+(moved.failure?.message ?? "")+" "+(stillThere ? L("The original is still in its place.","המקור עדיין במקומו.") : L("Look for the original in Trash.","המקור אמור להיות בפח.")))
+                        }
+                    }
+                }
+            }
+        }
+    }
+    /// Copies an offloaded folder back from its drive, checking every file against the manifest. Never onto an existing folder; the drive copy stays.
+    func bringBack(_ record:OffloadRecord,confirmed:Bool=false) {
+        guard !busy, !demoMode, record.isAvailable, record.broughtBackTo == nil else { return }
+        // The same drive it was copied to, not another one with the same name.
+        if let uuid=record.volumeUUID, let current=Volumes.info(at:URL(fileURLWithPath:record.destinationPath))?.uuid, current != uuid { // refused only when both are known and differ
+            show(L("A different drive","כונן אחר"),L("The connected drive named ","הכונן המחובר בשם ")+record.volumeName+L(" is not the one this folder was copied to."," אינו הכונן שאליו הועתקה התיקייה."));return
+        }
+        let target=Offloader.bringBackTarget(for:record)
+        guard FileManager.default.fileExists(atPath:target.deletingLastPathComponent().path) else {
+            show(L("Cannot bring back","לא ניתן להחזיר"),L("The folder it came from no longer exists: ","התיקייה שממנה הגיעה כבר לא קיימת: ")+(target.deletingLastPathComponent().path as NSString).abbreviatingWithTildeInPath);return
+        }
+        if !confirmed && !smokeMode {
+            let a=NSAlert();a.messageText=L("Bring “","להחזיר את ״")+record.name+L("” back?","״?")
+            a.informativeText=L("Avakasha copies it from ","Avakasha מעתיקה אותה מ־")+record.volumeName+L(" to "," אל ")+(target.path as NSString).abbreviatingWithTildeInPath+L(" and checks every file against the manifest. The copy on the drive stays."," ובודקת כל קובץ מול המניפסט. העותק בכונן נשאר.")
+            a.addButton(withTitle:L("Bring Back","החזר"));let cancel=a.addButton(withTitle:L("Cancel","ביטול"));cancel.keyEquivalent="\u{1b}"
+            guard a.runModal() == .alertFirstButtonReturn else { return }
+        }
+        token=CancellationToken();let jobToken=token;setBusy(true);status.stringValue=L("Bringing back ","מחזירים את ")+record.name+"…"
+        work.async {
+            let result=Result{ try Offloader.bringBack(URL(fileURLWithPath:record.destinationPath,isDirectory:true),to:target,token:jobToken) }
+            DispatchQueue.main.async {
+                self.setBusy(false)
+                switch result {
+                case .success:
+                    var records=self.offloadRecords()
+                    if let i=records.firstIndex(where:{ $0.id == record.id }) { records[i].broughtBackTo=target.path;try? OffloadIndex.save(records,to:self.offloadIndexURL) }
+                    self.offloadWindow.records=records;self.spaceChanged();self.updateSpaceLabel()
+                    self.status.stringValue=record.name+" · "+L("brought back to ","הוחזרה אל ")+(target.path as NSString).abbreviatingWithTildeInPath
+                    if !self.smokeMode { NSWorkspace.shared.activateFileViewerSelecting([target]) }
+                case .failure(let error):
+                    if (error as? OffloadError) == .cancelled { self.status.stringValue=L("Stopped · nothing brought back","נעצר · לא הוחזר דבר") } else { self.show(L("Not brought back","לא הוחזר"),self.offloadErrorText(error)) }
+                }
+            }
+        }
+    }
     func trashFolder(_ folder:URL,root:URL,title:String,explanation:String?,confirmed:Bool,fromCatalogue:Bool=false,onMoved:@escaping ()->Void) {
         guard !busy,!demoMode else { return }
         let expected:FolderIdentity
@@ -1665,6 +1829,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     func runSmokeTests() {
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent("avakasha-smoke-" + UUID().uuidString)
         historyURLOverride=temp.appendingPathComponent("history/space-history.json") // first thing: the test never reads or deletes the real size history
+        offloadIndexOverride=temp.appendingPathComponent("offload-index.json") // and never the real list of offloaded folders
         func cleanup() { try? FileManager.default.removeItem(at: temp); preferences.removePersistentDomain(forName:"Avakasha.SyntheticSmoke") }
         do {
             try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
@@ -2009,6 +2174,26 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             let scores=freeUpPanel.topSteps().map{ Double($0.measurement!.bytes)*FreeUpPanel.weight($0) };precondition(scores == scores.sorted(by:>),"Steps are ranked by size times safety")
             overviewPanel.onStep?(steps[0]);precondition(freeUpMode && freeUpPanel.selectedRow?.location.id == steps[0],"A step opens Free up space on its row");settle()
             precondition(freeUpPanel.caveatText.hasPrefix(L("System Data","נתוני")),"The System Data line names this drive's purgeable space and snapshots, or says what else System Data counts")
+            // Move to drive: a folder that stands in for an external drive; copy and check every file, original to Trash, Undo, bring back beside it.
+            let oldProject=fakeHome.appendingPathComponent("Documents/Old project",isDirectory:true),stand=temp.appendingPathComponent("drive/Avakasha Offload",isDirectory:true)
+            try FileManager.default.createDirectory(at:oldProject.appendingPathComponent("Footage"),withIntermediateDirectories:true)
+            try Data(repeating:0x70,count:48_000).write(to:oldProject.appendingPathComponent("Footage/clip.mov"));try Data("notes".utf8).write(to:oldProject.appendingPathComponent("notes.txt"))
+            offloadDestinationOverride=stand;offloadIndexOverride=temp.appendingPathComponent("offload-index.json")
+            let linked=fakeHome.appendingPathComponent("Documents/Linked",isDirectory:true);try FileManager.default.createDirectory(at:linked,withIntermediateDirectories:true)
+            try FileManager.default.createSymbolicLink(at:linked.appendingPathComponent("elsewhere"),withDestinationURL:oldProject)
+            offloadFolder(linked,root:homeRoot,allowHiddenAncestors:true,title:"Linked"){ preconditionFailure("A folder with a link is never moved") };settle()
+            precondition(FileManager.default.fileExists(atPath:linked.path) && !FileManager.default.fileExists(atPath:stand.appendingPathComponent("Linked").path) && offloadRecords().isEmpty,"Links stop the move before anything is copied")
+            var offloaded=false
+            offloadFolder(homeRoot.appendingPathComponent("Documents/Old project",isDirectory:true),root:homeRoot,allowHiddenAncestors:true,title:"Old project"){ offloaded=true };settle();settle()
+            let driveCopy=stand.appendingPathComponent("Old project",isDirectory:true)
+            precondition(offloaded && !FileManager.default.fileExists(atPath:oldProject.path) && FileManager.default.fileExists(atPath:driveCopy.appendingPathComponent(OffloadManifest.fileName).path),"Copied, checked, original in Trash")
+            precondition((try? Offloader.verify(driveCopy))?.files.count == 2 && offloadRecords().first?.name == "Old project" && offloadRecords().first?.isAvailable == true && feedback.stringValue.contains(L("checked","נבדק")),"The copy verifies and is listed")
+            undoTrash();settle();precondition(FileManager.default.fileExists(atPath:oldProject.appendingPathComponent("Footage/clip.mov").path) && FileManager.default.fileExists(atPath:driveCopy.path),"Undo brings the original back; the drive copy stays")
+            bringBack(offloadRecords()[0],confirmed:true);settle()
+            let back=fakeHome.appendingPathComponent("Documents/Old project (brought back)",isDirectory:true)
+            precondition((try? Data(contentsOf:back.appendingPathComponent("Footage/clip.mov"))) == (try? Data(contentsOf:oldProject.appendingPathComponent("Footage/clip.mov"))) && offloadRecords()[0].broughtBackTo != nil,"Brought back beside the original, never over it")
+            offloadWindow.records=offloadRecords();precondition(OffloadWindowController.status(of:offloadWindow.records[0]).hasPrefix(L("Brought back","הוחזר")))
+            try FileManager.default.removeItem(at:back);try FileManager.default.removeItem(at:linked);offloadDestinationOverride=nil
             // Weekly check over the synthetic home: the rebuildable known locations measured, a date and one total kept, an alert only when worth it.
             var alerts:[(String,String)]=[];notifyOverride={ alerts.append(($0,$1)) };weeklyMinimum=10_000
             preferences.removeObject(forKey:"lastWeeklyCheck");preferences.removeObject(forKey:"lastWeeklyCanGo")
@@ -2052,7 +2237,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(preferences.bool(forKey:"AppleTextDirection"),"Hebrew must switch the layout direction")
             chooseLanguage(languageItems[0]);precondition(preferences.stringArray(forKey:"AppleLanguages") == ["en"] && !preferences.bool(forKey:"AppleTextDirection"))
             precondition(isCurrentRoot(root!) && !isCurrentRoot(temp.appendingPathComponent("map")),"Clicking the loaded location again must not rescan")
-            print("UI smoke: storage map, largest files, installers, reviewed marks, session space summary, free-up search, overview steps, weekly check, space guard, selection, old-file sorting, preview, confirmation preference, Delete, Undo, Redo, blocked-restore retry and held-key protection passed. No real files changed; no windows shown.")
+            print("UI smoke: storage map, largest files, installers, reviewed marks, session space summary, free-up search, overview steps, move to drive, weekly check, space guard, selection, old-file sorting, preview, confirmation preference, Delete, Undo, Redo, blocked-restore retry and held-key protection passed. No real files changed; no windows shown.")
             cleanup();fflush(stdout);exit(0)
         } catch { fputs("UI smoke failed: \(error)\n",stderr);cleanup();exit(1) }
     }

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.0-beta.16
+
+- **Move to Drive…** (storage map toolbar, and Free up space for folders untouched for months): make room without deciding what to delete. After one confirmation (Cancel by default), Avakasha copies the folder to "Avakasha Offload" on an external drive, checks every file against its original with SHA-256, confirms the original did not change while it was copied, and only then moves the original to Trash through the usual guarded folder move. ⌘Z brings the original back; the copy stays on the drive. Folders holding links, special files, cloud placeholders or another drive are refused before anything is copied, and a failed or stopped copy leaves nothing behind on the drive.
+- Each copy carries an "Avakasha manifest.json" with every file's size and SHA-256, so it can be checked later with or without Avakasha.
+- **Offloaded Folders…** (View menu, ⇧⌘O) lists every folder moved to a drive, where it is, and whether its drive is connected. **Bring Back…** copies a folder back, checking every file against the manifest, into its original place or beside it; it never overwrites, and the drive copy stays.
+
 ## 0.1.0-beta.15
 
 - **Keep free space** (overview card, or Avakasha › Keep Free Space): choose a floor (20, 40, 60 or 100 GB). While Avakasha is open, it keeps a small local history of free space and of the sizes it measures, shows what grew in the last week ("Since 16 Sep: Xcode DerivedData +7.2 GB · Downloads +1.4 GB · free −12.6 GB"), forecasts when the floor will be reached at the current pace, and offers **Plan to free …** when the floor is near. Off by default.

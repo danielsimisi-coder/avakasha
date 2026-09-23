@@ -65,6 +65,9 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
     /// Moves the selected folder to Trash through the controller's guarded flow (fresh measure, confirmation, identity check).
     let trashButton = NSButton()
     var onTrashFolder: ((StorageNode) -> Void)?
+    /// Copies the folder to another drive, checks it, then moves the original to Trash.
+    let offloadButton = NSButton()
+    var onOffloadFolder: ((StorageNode) -> Void)?
     let detail = NSStackView()
     private let detailTitle = NSTextField(wrappingLabelWithString: "")
     private let detailSize = NSTextField(labelWithString: "")
@@ -110,7 +113,10 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         rescanButton.toolTip = L("Files were moved or restored since this map was measured. Measure again to update the numbers.", "קבצים הועברו או שוחזרו מאז שהמפה נמדדה. מדידה מחדש מעדכנת את המספרים.")
         trashButton.image = symbol("trash", 13, .medium, color: .systemRed)
         trashButton.toolTip = L("Measures the folder again, shows what it holds and asks before moving the whole folder to Trash. Not for bundles, hidden folders or folders with unmeasured items.", "מודד את התיקייה מחדש, מציג מה יש בה ומבקש אישור לפני העברת התיקייה כולה לפח. לא לחבילות, לתיקיות מוסתרות או לתיקיות עם פריטים שלא נמדדו.")
-        let toolbar = NSStackView(views: [crumbs, spacer, rescanButton, openButton, reviewButton, largestButton, trashButton]); toolbar.spacing = 8; toolbar.alignment = .centerY
+        offloadButton.bezelStyle = .rounded; offloadButton.image = symbol("externaldrive.badge.plus", 13); offloadButton.imagePosition = .imageOnly; offloadButton.target = self; offloadButton.action = #selector(offloadTapped)
+        offloadButton.toolTip = L("Move to Drive…: copies the folder to an external drive, checks every file, then moves the original to Trash.", "העבר לכונן…: מעתיק את התיקייה לכונן חיצוני, בודק כל קובץ, ואז מעביר את המקור לפח.")
+        offloadButton.setAccessibilityLabel(L("Move to Drive…", "העבר לכונן…"))
+        let toolbar = NSStackView(views: [crumbs, spacer, rescanButton, openButton, reviewButton, largestButton, offloadButton, trashButton]); toolbar.spacing = 8; toolbar.alignment = .centerY
         table.onTrash = { [weak self] in self?.trashTapped() }
         crumbs.setContentCompressionResistancePriority(.defaultLow, for: .horizontal); crumbs.widthAnchor.constraint(greaterThanOrEqualToConstant: 150).isActive = true
         table.rowHeight = 30; table.intercellSpacing = NSSize(width: 12, height: 4); table.usesAlternatingRowBackgroundColors = false; table.style = .inset
@@ -217,6 +223,7 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         return node
     }
     @objc func trashTapped() { if let node = trashableFolder { onTrashFolder?(node) } else { NSSound.beep() } }
+    @objc func offloadTapped() { if let node = trashableFolder { onOffloadFolder?(node) } else { NSSound.beep() } }
     /// Drops a folder that went to Trash from the tree and redraws the current level.
     func remove(_ node: StorageNode) {
         guard let parent = node.parent, let current = current else { return }
@@ -318,7 +325,7 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         openButton.isEnabled = selectedRow?.isOpenable == true
         reviewButton.isEnabled = reviewTarget != nil
         largestButton.isEnabled = result != nil
-        trashButton.isEnabled = trashableFolder != nil
+        trashButton.isEnabled = trashableFolder != nil; offloadButton.isEnabled = trashableFolder != nil
     }
-    func setEnabled(_ enabled: Bool) { table.isEnabled = enabled; crumbs.isEnabled = enabled; trashButton.isEnabled = enabled && trashableFolder != nil; if enabled { updateButtons() } else { openButton.isEnabled = false; reviewButton.isEnabled = false; largestButton.isEnabled = false } }
+    func setEnabled(_ enabled: Bool) { table.isEnabled = enabled; crumbs.isEnabled = enabled; trashButton.isEnabled = enabled && trashableFolder != nil; offloadButton.isEnabled = enabled && trashableFolder != nil; if enabled { updateButtons() } else { openButton.isEnabled = false; reviewButton.isEnabled = false; largestButton.isEnabled = false } }
 }

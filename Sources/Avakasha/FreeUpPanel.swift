@@ -210,6 +210,9 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
     var onCopyCommand: ((String) -> Void)?
     var onSelectionChange: (() -> Void)?
     var onFind: (() -> Void)?
+    /// For folders untouched for months: copy to a drive, check, then Trash the original.
+    let driveButton = NSButton()
+    var onMoveToDrive: ((KnownLocation) -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -232,7 +235,10 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         trashButton.toolTip = L("Moves this folder to Trash after measuring it again and confirming. Only for data the owning app rebuilds.", "מעביר את התיקייה לפח אחרי מדידה מחדש ואישור. רק לנתונים שהאפליקציה בונה מחדש.")
         measureButton.toolTip = L("Measures every listed location. Reads names and sizes only.", "מודד את כל המיקומים ברשימה. קורא רק שמות וגדלים.")
         let spacer = NSView(); spacer.setContentHuggingPriority(.init(1), for: .horizontal)
-        let toolbar = NSStackView(views: [measureButton, spacer, revealButton, actionButton, trashButton]); toolbar.spacing = 8; toolbar.alignment = .centerY
+        driveButton.title = L("Move to Drive…", "העבר לכונן…"); driveButton.bezelStyle = .rounded; driveButton.font = Type.bodyMedium; driveButton.image = symbol("externaldrive.badge.plus", 13); driveButton.imagePosition = .imageLeading
+        driveButton.target = self; driveButton.action = #selector(moveToDrive); driveButton.isHidden = true
+        driveButton.toolTip = L("Copies the folder to an external drive, checks every file against its original, then moves the original to Trash. Undo brings it back; the copy stays on the drive.", "מעתיק את התיקייה לכונן חיצוני, בודק כל קובץ מול המקור, ואז מעביר את המקור לפח. ביטול מחזיר אותו; העותק נשאר בכונן.")
+        let toolbar = NSStackView(views: [measureButton, spacer, revealButton, actionButton, driveButton, trashButton]); toolbar.spacing = 8; toolbar.alignment = .centerY
         copyButton.isHidden = true // folded into the row action ("Copy command & open Terminal")
         findButton.image = symbol("sparkle.magnifyingglass", 12); findButton.imagePosition = .imageLeading
         findButton.toolTip = L("Looks through your whole home folder for build and cache folders, data of apps that are no longer installed, and large folders untouched for months. Reads names, sizes and dates only.", "עובר על כל תיקיית הבית ומחפש תיקיות בנייה ומטמון, נתונים של אפליקציות שכבר לא מותקנות ותיקיות גדולות שלא השתנו חודשים. קורא רק שמות, גדלים ותאריכים.")
@@ -382,6 +388,7 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         table.selectRowIndexes(indexes, byExtendingSelection: false); window?.makeFirstResponder(table)
     }
     @objc func findMore() { onFind?() }
+    @objc func moveToDrive() { if let row = selectedRow, selectedRows.count == 1, row.location.category == FoundLocations.untouched, !row.moved { onMoveToDrive?(row.location) } }
     @objc func planTapped() {
         let text = planField.stringValue.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespaces)
         guard let gb = Double(text), gb > 0, gb < 100_000 else { NSSound.beep(); window?.makeFirstResponder(planField); return }
@@ -453,7 +460,7 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         guard let index = rows.firstIndex(where: { $0.location.id == location.id }) else { return }
         rows[index].moved = true; sortRows(); updateDetail(); updateButtons(); onSelectionChange?()
     }
-    func setEnabled(_ enabled: Bool) { table.isEnabled = enabled; planField.isEnabled = enabled; if enabled { updateButtons(); updateSummary() } else { [measureButton, trashButton, revealButton, copyButton, actionButton, selectRebuildableButton, findButton, planButton].forEach { $0.isEnabled = false } } }
+    func setEnabled(_ enabled: Bool) { table.isEnabled = enabled; planField.isEnabled = enabled; if enabled { updateButtons(); updateSummary() } else { [measureButton, trashButton, revealButton, copyButton, actionButton, selectRebuildableButton, findButton, planButton, driveButton].forEach { $0.isEnabled = false } } }
     /// A folder came back from Trash: it is present again and needs measuring again.
     func restored(_ url: URL) {
         guard let index = rows.firstIndex(where: { $0.location.url(home: home).standardizedFileURL.path == url.standardizedFileURL.path }) else { return }
@@ -534,6 +541,8 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         case .terminal: actionButton.title = L("Copy command & open Terminal", "העתק פקודה ופתח Terminal"); actionButton.image = symbol("terminal", 13)
         case .none: break
         }
+        let drive = !many && row?.moved == false && row?.location.category == FoundLocations.untouched
+        driveButton.isHidden = !drive; driveButton.isEnabled = drive
         actionButton.isHidden = action == .none; actionButton.isEnabled = action != .none; actionButton.setAccessibilityLabel(actionButton.title)
     }
 }
