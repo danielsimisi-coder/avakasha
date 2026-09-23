@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.0-beta.14
+
+- **System Data, explained further.** Each drive card on the overview names the part of System Data no file move changes: purgeable space macOS frees by itself (from volume attributes) and local snapshots on internal drives, with Time Machine's local ones counted separately and the newest date (listed with `fs_snapshot_list`, the call behind `tmutil listlocalsnapshots`: names and dates only, no administrator rights, nothing changed). An info button explains both, and a Time Machine Settings button appears when Time Machine keeps local snapshots. The Free up space caveat line shows the same numbers for the home folder's drive. Snapshot sizes need administrator rights, so only counts are shown.
+- **Show in Menu Bar** (Avakasha menu): free space on the startup disk in the menu bar, a menu with every drive's free space, what can go to Trash now (as last measured), Check What Can Go…, Open Avakasha, the weekly check, Open at Login and Quit. With the item shown, closing the window keeps Avakasha running.
+- **Weekly Check & Low-Space Alerts** (off by default): once a week while Avakasha is open, it measures the rebuildable known locations (names and sizes, like Free up space) and sends a local notification when at least 2 GB can go to Trash and it grew by 1 GB or more since the previous check; the fresh sizes also fill Free up space and the overview. When the startup disk has under 15 GB free (under 10% on a disk smaller than 150 GB), it warns at most once a day. Other apps' containers are left out of the weekly check so it never raises a macOS permission prompt on its own. Only the date of the last check, one total and the date of the last warning are stored. Nothing is ever moved by the check.
+- **Open at Login** registers Avakasha as a login item with macOS (and opens Login Items settings when macOS asks for approval).
+
 ## 0.1.0-beta.13
 
 - **What can go** on the overview: once Free up space has measured, the overview says how much can go to Trash now and how much needs an app, Terminal or a review, and lists the five most worthwhile steps, ranked by size weighted by how safe and direct each step is. A folder that holds other listed rows (all app caches) gives way to them. Clicking a step opens Free up space on that row. Before anything is measured it offers "Check what can go" and measures nothing by itself.

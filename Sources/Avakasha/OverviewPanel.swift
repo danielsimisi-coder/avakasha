@@ -42,6 +42,9 @@ final class OverviewPanel: NSView {
     private(set) var stepIDs: [String] = []
     var onStep: ((String) -> Void)?
     var onOpenTrash: (() -> Void)?
+    var onTimeMachine: (() -> Void)?
+    /// Per drive, the part of System Data no file move changes: purgeable space and local snapshots (names and dates only).
+    private(set) var systemDataLines: [String] = []
     let openTrashButton = NSButton()
     private let sessionRow = NSStackView()
     private let sessionLabel = NSTextField(wrappingLabelWithString: "")
@@ -129,7 +132,7 @@ final class OverviewPanel: NSView {
     /// Re-reads the volumes and the session number; cheap, so call it whenever the overview is shown.
     /// `trash` is the Trash's size as Free up space last measured it, if it could.
     func update(sessionMoved: Int64, trash: Int64? = nil) {
-        volumes = Volumes.mounted()
+        volumes = Volumes.mounted(); systemDataLines = []
         volumesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for volume in volumes {
             let name = NSTextField(labelWithString: volume.name + (volume.isStartup ? " · " + L("startup disk", "דיסק האתחול") : (volume.isRemovable ? " · " + L("external", "חיצוני") : "")))
@@ -139,6 +142,7 @@ final class OverviewPanel: NSView {
             let bar = ShareBar(); bar.fraction = volume.usedFraction; bar.thickness = 6; bar.heightAnchor.constraint(equalToConstant: 10).isActive = true
             bar.setAccessibilityLabel(volume.name + " " + L("used", "בשימוש"))
             let inner = NSStackView(views: [name, bar, numbers]); inner.orientation = .vertical; inner.alignment = .leading; inner.spacing = 6
+            if let row = systemDataRow(for: volume) { inner.addArrangedSubview(row) }
             // A plain layer-backed card pinned to its content, so its height follows the rows inside it.
             let card = NSView(); card.wantsLayer = true; card.layer?.cornerRadius = 10; card.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
             inner.translatesAutoresizingMaskIntoConstraints = false; card.addSubview(inner)
@@ -162,6 +166,32 @@ final class OverviewPanel: NSView {
         continueButton.title = L("Continue: ", "המשך: ") + (path ?? ""); continueButton.toolTip = path
         continueButton.setAccessibilityLabel(L("Continue with the last folder", "המשך עם התיקייה האחרונה") + (path.map { " · " + $0 } ?? ""))
     }
+    /// "System Data includes 4.9 GB purgeable space · 2 local Time Machine snapshots, newest 23 Sep", with an explanation and,
+    /// when Time Machine keeps snapshots, a way to its settings. Nothing is removed from here.
+    private func systemDataRow(for volume: VolumeInfo) -> NSView? {
+        let snapshots = LocalSnapshots.listIfInternal(volume)
+        let timeMachine = snapshots.filter(\.isTimeMachine), others = snapshots.count - timeMachine.count
+        var parts: [String] = []
+        if volume.purgeable >= 500_000_000 { parts.append(bytes(volume.purgeable) + L(" purgeable space macOS frees by itself", " מקום שניתן לפינוי, ש־macOS מפנה בעצמו")) }
+        if let newest = timeMachine.first {
+            parts.append("\(timeMachine.count) " + (timeMachine.count == 1 ? L("local Time Machine snapshot", "תמונת מצב מקומית של Time Machine") : L("local Time Machine snapshots", "תמונות מצב מקומיות של Time Machine"))
+                         + L(", newest ", ", האחרונה ") + DateFormatter.localizedString(from: newest.created, dateStyle: .medium, timeStyle: .short))
+        }
+        if others > 0 { parts.append("\(others) " + (others == 1 ? L("other snapshot", "תמונת מצב אחרת") : L("other snapshots", "תמונות מצב אחרות"))) }
+        guard !parts.isEmpty else { return nil }
+        let text = L("System Data includes ", "נתוני המערכת כוללים ") + parts.joined(separator: " · ")
+        systemDataLines.append(text)
+        let label = NSTextField(wrappingLabelWithString: text); label.font = Type.caption; label.textColor = .secondaryLabelColor
+        let info = InfoButton(L("About purgeable space and snapshots", "על מקום שניתן לפינוי ותמונות מצב"), L("Purgeable space is data macOS can remove by itself when space is needed, such as iCloud files it can download again and caches; it is already counted as free here. Local Time Machine snapshots keep recent versions of your files on this disk until they reach your backup disk; macOS removes them after about 24 hours, or sooner when space runs low. Other snapshots come from system updates or backup apps. Their sizes need administrator rights to read, so Avakasha shows only how many there are. Nothing here needs deleting by hand.", "מקום שניתן לפינוי הוא נתונים ש־macOS יכול להסיר בעצמו כשצריך מקום, כמו קובצי iCloud שאפשר להוריד שוב ומטמונים; כאן הוא כבר נספר כפנוי. תמונות מצב מקומיות של Time Machine שומרות גרסאות אחרונות של הקבצים בדיסק הזה עד שהן מגיעות לדיסק הגיבוי; macOS מסיר אותן אחרי כ־24 שעות, או מוקדם יותר כשהמקום נגמר. תמונות מצב אחרות מגיעות מעדכוני מערכת או מאפליקציות גיבוי. כדי לקרוא את הגודל שלהן צריך הרשאות מנהל, ולכן Avakasha מציגה רק כמה יש. אין צורך למחוק כאן דבר ידנית."))
+        let row = NSStackView(views: [label, info]); row.spacing = 4; row.alignment = .firstBaseline
+        label.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        if !timeMachine.isEmpty {
+            let settings = NSButton(title: L("Time Machine Settings…", "הגדרות Time Machine…"), target: self, action: #selector(openTimeMachine)); settings.bezelStyle = .rounded; settings.controlSize = .small; settings.font = Type.caption
+            row.addArrangedSubview(settings)
+        }
+        return row
+    }
+    @objc private func openTimeMachine() { onTimeMachine?() }
     @objc private func mapHome() { onMapHome?() }
     @objc private func mapDrive() { onMapDrive?() }
     @objc private func freeUp() { onFreeUp?() }

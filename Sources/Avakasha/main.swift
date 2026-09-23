@@ -3,6 +3,8 @@ import Quartz
 import AVKit
 import ImageIO
 import SQLite3
+import ServiceManagement
+import UserNotifications
 import AvakashaCore
 
 /// Interface language. English by default; Hebrew is an explicit choice in Avakasha › Language and applies on the next launch.
@@ -65,7 +67,7 @@ final class FileTable: NSTableView {
     }
 }
 
-final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSWindowDelegate, NSMenuItemValidation {
+final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSource, NSTableViewDelegate, NSSearchFieldDelegate, NSWindowDelegate, NSMenuItemValidation, UNUserNotificationCenterDelegate {
     let smokeMode = ProcessInfo.processInfo.arguments.contains("--smoke-test")
     let demoMode = ProcessInfo.processInfo.arguments.contains("--demo") || ProcessInfo.processInfo.arguments.contains("--demo-map")
     var demoFolder: URL?
@@ -157,6 +159,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     var trashBackend: TrashBackend = SystemTrash()
     var redoButton: NSButton!
     var confirmationMenuItem: NSMenuItem?
+    var menuBarMenuItem: NSMenuItem?, weeklyMenuItem: NSMenuItem?, loginMenuItem: NSMenuItem?
+    let menuBar = MenuBarController()
+    var watchTimer: Timer?
+    let watchQueue = DispatchQueue(label:"Avakasha.watch",qos:.utility)
+    var weeklyRunning = false
+    /// Test hooks: the smoke test captures notifications instead of posting them, and lowers the weekly threshold for its tiny fixtures.
+    var notifyOverride: ((String,String)->Void)?
+    var weeklyMinimum: Int64 = 2_000_000_000
+    /// Notifications need a real app bundle; `swift run` has none.
+    var canNotify: Bool { Bundle.main.bundleURL.pathExtension == "app" && Bundle.main.bundleIdentifier != nil }
     var mapMode = false
     /// The home screen: disks, this session, where to start. Shown at launch until something is scanned or mapped.
     var overviewMode = false
@@ -333,6 +345,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         overviewPanel.onMapHome={[weak self] in if let h=self?.home { self?.startMap(h,reuseRecent:true) }}
         overviewPanel.onStep={[weak self] id in guard let self=self, !self.busy else { return };self.setFreeUp(true);self.freeUpPanel.select(id:id)}
         overviewPanel.onOpenTrash={[weak self] in if self?.smokeMode == false { self?.openTrash() }}
+        overviewPanel.onTimeMachine={[weak self] in if self?.smokeMode == false, let url=URL(string:"x-apple.systempreferences:com.apple.Time-Machine-Settings.extension") { NSWorkspace.shared.open(url) }}
         overviewPanel.onMapDrive={[weak self] in self?.chooseMapFolder()}
         overviewPanel.onFreeUp={[weak self] in self?.showFreeUp()}
         overviewPanel.onContinue={[weak self] in self?.resumeFolder()}
@@ -406,6 +419,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         for v in [header,folderLabel,filters,analysis,workspace,feedbackRow!,actionBar,bottomBar] {v.widthAnchor.constraint(equalTo:content.widthAnchor).isActive=true}
         makeMenus();modeChanged();updateEnabled();updatePreview();setOverview(true)
         status.stringValue=L("Ready — choose a location to start.","מוכן — בוחרים מיקום כדי להתחיל.")
+        setupSpaceWatch() // wires the menu bar callbacks; timers, notifications and the item itself stay off in the smoke test and the demo
         if smokeMode {runSmokeTests();return}
         if ProcessInfo.processInfo.arguments.contains("--launch-check") {print("Packaged launch passed: production preferences and interface initialized; no scan started.");fflush(stdout);exit(0)}
         if demoMode { prepareDemo() }
@@ -533,6 +547,13 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             item.state = AppLanguage.current == code ? .on : .off;languageMenu.addItem(item)
         }
         language.submenu=languageMenu;menu.insertItem(language,at:3);languageMenuItem=language
+        for (index,(en,he,action,key)) in [("Show in Menu Bar","הצג בשורת התפריטים",#selector(toggleMenuBar(_:)),"menuBar"),("Weekly Check & Low-Space Alerts","בדיקה שבועית והתראה על מקום נמוך",#selector(toggleWeeklyCheck(_:)),"weeklyCheck"),("Open at Login","פתיחה בהתחברות",#selector(toggleOpenAtLogin(_:)),"")].enumerated() {
+            let entry=NSMenuItem(title:L(en,he),action:action,keyEquivalent:"");entry.target=self
+            entry.state = key.isEmpty ? (loginEnabled ? .on : .off) : (preferences.bool(forKey:key) ? .on : .off)
+            menu.insertItem(entry,at:4+index)
+            switch index { case 0: menuBarMenuItem=entry; case 1: weeklyMenuItem=entry; default: loginMenuItem=entry }
+        }
+        menu.insertItem(.separator(),at:7)
         NSApp.mainMenu=main
     }
     /// True while the file list is the view on screen (not the overview, the map or Free up space).
@@ -595,13 +616,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         case #selector(findMoreCommand): return !busy
         case #selector(showInFinderCommand): return !busy && (mapMode ? mapPanel.current != nil : (freeUpMode ? freeUpPanel.revealButton.isEnabled : focusedFile != nil))
         case #selector(moveToTrashCommand): return !busy && !demoMode && (mapMode ? mapPanel.trashableFolder != nil : (freeUpMode ? freeUpPanel.trashButton.isEnabled : (root != nil && !selectedFiles.isEmpty)))
+        case #selector(toggleMenuBar(_:)),#selector(toggleWeeklyCheck(_:)),#selector(toggleOpenAtLogin(_:)): return !demoMode
         default: return true
         }
     }
     /// The standard About panel shows the bundle icon at its proper size; the version lives here, not in the title bar.
     @objc func aboutApp() {
         let credits=NSAttributedString(string:"© 2026 Daniel Siman Tov · daniel.simisi@gmail.com\n"+L("Local. Private. Yours. Nothing is deleted; files go to Trash and ⌘Z brings them back. MIT license. Not affiliated with WhatsApp or Meta.","מקומי. פרטי. שלך. שום דבר לא נמחק; קבצים עוברים לפח ו־⌘Z מחזיר אותם. רישיון MIT. ללא שיוך ל־WhatsApp או Meta."),attributes:[.font:Type.caption,.foregroundColor:NSColor.labelColor])
-        NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"Avakasha",.applicationVersion:"0.1.0 beta 13",.version:"",.credits:credits])
+        NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"Avakasha",.applicationVersion:"0.1.0 beta 14",.version:"",.credits:credits])
     }
     func show(_ title: String, _ detail: String) {
         if smokeMode { print("Alert suppressed in smoke mode: \(title) — \(detail)"); return }
@@ -1956,6 +1978,24 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(!steps.isEmpty && steps.count <= 5 && overviewPanel.stepIDs == steps && !steps.contains("system.caches") && overviewPanel.stepsButton.title == L("Show all in Free up space","הצג הכול בפינוי מקום"),"Steps: \(steps)")
             let scores=freeUpPanel.topSteps().map{ Double($0.measurement!.bytes)*FreeUpPanel.weight($0) };precondition(scores == scores.sorted(by:>),"Steps are ranked by size times safety")
             overviewPanel.onStep?(steps[0]);precondition(freeUpMode && freeUpPanel.selectedRow?.location.id == steps[0],"A step opens Free up space on its row");settle()
+            precondition(freeUpPanel.caveatText.hasPrefix(L("System Data","נתוני")),"The System Data line names this drive's purgeable space and snapshots, or says what else System Data counts")
+            // Weekly check over the synthetic home: the rebuildable known locations measured, a date and one total kept, an alert only when worth it.
+            var alerts:[(String,String)]=[];notifyOverride={ alerts.append(($0,$1)) };weeklyMinimum=10_000
+            preferences.removeObject(forKey:"lastWeeklyCheck");preferences.removeObject(forKey:"lastWeeklyCanGo")
+            var reports:[SpaceWatch.Report?]=[]
+            func waitReports(_ n:Int) { let deadline=Date().addingTimeInterval(20);while reports.count<n && Date()<deadline { RunLoop.current.run(until:Date().addingTimeInterval(0.01)) };precondition(reports.count == n,"Weekly check timed out") }
+            runWeeklyCheck(home:fakeHome){ reports.append($0) };waitReports(1)
+            if case .canGo(let canGo,.none)? = reports[0] { precondition(canGo >= 30_000) } else { preconditionFailure("The first weekly check reports what can go: \(reports)") }
+            precondition(alerts.count == 1 && !SpaceWatch.isDue(last:preferences.object(forKey:"lastWeeklyCheck") as? Date) && ((preferences.object(forKey:"lastWeeklyCanGo") as? NSNumber)?.int64Value ?? 0) >= 30_000,"One alert; only a date and a total are kept")
+            runWeeklyCheck(home:fakeHome){ reports.append($0) };waitReports(2);precondition(reports[1] == nil && alerts.count == 1,"Nothing grew since last time: no second alert")
+            notifyOverride=nil;weeklyMinimum=2_000_000_000;preferences.removeObject(forKey:"lastWeeklyCheck");preferences.removeObject(forKey:"lastWeeklyCanGo")
+            // Menu bar and weekly preferences: stored and reflected in the menu, without a real menu bar item or a notification prompt in the test.
+            preferences.set(false,forKey:"menuBar");preferences.set(false,forKey:"weeklyCheck") // a start state that does not depend on an earlier interrupted run
+            toggleMenuBar(nil);precondition(preferences.bool(forKey:"menuBar") && menuBarMenuItem?.state == .on && !menuBar.isShown && applicationShouldTerminateAfterLastWindowClosed(NSApp));toggleMenuBar(nil);precondition(!preferences.bool(forKey:"menuBar") && menuBarMenuItem?.state == .off)
+            toggleWeeklyCheck(nil);precondition(preferences.bool(forKey:"weeklyCheck") && weeklyMenuItem?.state == .on)
+            let probe=NSMenu();menuBar.menuNeedsUpdate(probe);let probeTitles=probe.items.map(\.title)
+            precondition(probeTitles.contains(L("Check What Can Go…","בדוק מה אפשר לפנות…")) && probeTitles.contains{ $0.hasPrefix(L("Can go to Trash now: ","אפשר להעביר לפח עכשיו: ")) } && probe.items.first{ $0.title == L("Weekly Check & Low-Space Alerts","בדיקה שבועית והתראה על מקום נמוך") }?.state == .on && probeTitles.last == L("Quit Avakasha","צא מ־Avakasha"),"Menu bar menu: \(probeTitles)")
+            toggleWeeklyCheck(nil);precondition(!preferences.bool(forKey:"weeklyCheck"))
             setFreeUp(false);freeUpPanel.setShowSmall(false);home=FileManager.default.homeDirectoryForCurrentUser;freeUpPanel.home=home;try FileManager.default.removeItem(at:fakeHome)
             let savedRoot=root!;activateRoot(temp.appendingPathComponent("other"));precondition(!history.canUndo && !history.canRedo);activateRoot(savedRoot);precondition(history.canRedo)
             toggleTrashConfirmation(confirmationMenuItem!);precondition(!preferences.bool(forKey:"skipTrashConfirmation"))
@@ -1965,11 +2005,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(preferences.bool(forKey:"AppleTextDirection"),"Hebrew must switch the layout direction")
             chooseLanguage(languageItems[0]);precondition(preferences.stringArray(forKey:"AppleLanguages") == ["en"] && !preferences.bool(forKey:"AppleTextDirection"))
             precondition(isCurrentRoot(root!) && !isCurrentRoot(temp.appendingPathComponent("map")),"Clicking the loaded location again must not rescan")
-            print("UI smoke: storage map, largest files, installers, reviewed marks, session space summary, free-up search, selection, old-file sorting, preview, confirmation preference, Delete, Undo, Redo, blocked-restore retry and held-key protection passed. No real files changed; no windows shown.")
+            print("UI smoke: storage map, largest files, installers, reviewed marks, session space summary, free-up search, overview steps, weekly check, selection, old-file sorting, preview, confirmation preference, Delete, Undo, Redo, blocked-restore retry and held-key protection passed. No real files changed; no windows shown.")
             cleanup();fflush(stdout);exit(0)
         } catch { fputs("UI smoke failed: \(error)\n",stderr);cleanup();exit(1) }
     }
-    func windowShouldClose(_ sender:NSWindow)->Bool { applicationShouldTerminate(NSApplication.shared) == .terminateNow }
+    func windowShouldClose(_ sender:NSWindow)->Bool { menuBar.isShown ? true : applicationShouldTerminate(NSApplication.shared) == .terminateNow } // with the menu bar item, closing the window keeps Avakasha running
+    func applicationShouldHandleReopen(_ sender:NSApplication,hasVisibleWindows flag:Bool)->Bool { if !flag { bringToFront() };return true }
     func applicationShouldTerminate(_ sender:NSApplication)->NSApplication.TerminateReply{
         if busy && !(token.isCancelled && cancellable){show(L("Still working","עדיין בפעולה"),L("Stop the scan and wait, or let the move to Trash finish, then quit.","אפשר לעצור את הסריקה ולהמתין, או לתת להעברה לפח להסתיים, ואז לצאת."));return .terminateCancel}
         let waiting=waitingRestores
@@ -1986,7 +2027,109 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         for h in [history]+Array(folderHistories.values) where seen.insert(ObjectIdentifier(h)).inserted {total+=h.blockedCount}
         return total
     }
-    func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{true}
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication)->Bool{ !menuBar.isShown }
+
+    // MARK: Menu bar, weekly check, low-space alert
+    func setupSpaceWatch() {
+        window.isReleasedWhenClosed=false // the menu bar item reopens the same window
+        menuBar.canGoLine={ [weak self] in
+            guard let self=self else { return nil }
+            if self.freeUpPanel.hasMeasurements { let now=self.freeUpPanel.movableTotal;return now > 0 ? L("Can go to Trash now: ","אפשר להעביר לפח עכשיו: ")+bytes(now) : nil }
+            guard let total=(self.preferences.object(forKey:"lastWeeklyCanGo") as? NSNumber)?.int64Value, total > 0, let date=self.preferences.object(forKey:"lastWeeklyCheck") as? Date else { return nil }
+            return L("Could go to Trash on ","אפשר היה להעביר לפח ב־")+DateFormatter.localizedString(from:date,dateStyle:.short,timeStyle:.none)+": "+bytes(total)
+        }
+        menuBar.weeklyOn={ [weak self] in self?.preferences.bool(forKey:"weeklyCheck") ?? false }
+        menuBar.loginOn={ [weak self] in self?.loginEnabled ?? false }
+        menuBar.onOpen={ [weak self] in self?.bringToFront() }
+        menuBar.onCheck={ [weak self] in guard let self=self else { return };self.bringToFront();if !self.busy { self.setFreeUp(true) } }
+        menuBar.onToggleWeekly={ [weak self] in self?.toggleWeeklyCheck(nil) }
+        menuBar.onToggleLogin={ [weak self] in self?.toggleOpenAtLogin(nil) }
+        guard !smokeMode, !demoMode else { return }
+        if canNotify { UNUserNotificationCenter.current().delegate=self }
+        if preferences.bool(forKey:"menuBar") { menuBar.setShown(true) }
+        // The check runs hourly while Avakasha is open (in the menu bar it can stay open all week), and a minute after launch.
+        watchTimer=Timer.scheduledTimer(withTimeInterval:3600,repeats:true){ [weak self] _ in self?.watchTick() }
+        DispatchQueue.main.asyncAfter(deadline:.now()+60){ [weak self] in self?.watchTick() }
+    }
+    var loginEnabled: Bool { !smokeMode && SMAppService.mainApp.status == .enabled }
+    func bringToFront() { window.makeKeyAndOrderFront(nil);NSApp.activate(ignoringOtherApps:true) }
+    @objc func toggleMenuBar(_ sender:NSMenuItem?) {
+        let on = !preferences.bool(forKey:"menuBar");preferences.set(on,forKey:"menuBar");menuBarMenuItem?.state = on ? .on : .off
+        if !smokeMode && !demoMode { menuBar.setShown(on) }
+    }
+    @objc func toggleWeeklyCheck(_ sender:NSMenuItem?) {
+        let on = !preferences.bool(forKey:"weeklyCheck");preferences.set(on,forKey:"weeklyCheck");weeklyMenuItem?.state = on ? .on : .off
+        guard on, !smokeMode, !demoMode else { return }
+        // The first check waits for the answer to the notification prompt, so its report is not lost while the prompt is open.
+        guard canNotify else { DispatchQueue.main.asyncAfter(deadline:.now()+5){ [weak self] in self?.watchTick() };return }
+        UNUserNotificationCenter.current().requestAuthorization(options:[.alert]){ [weak self] granted,_ in
+            DispatchQueue.main.async {
+                if !granted { self?.show(L("Notifications are off","ההתראות כבויות"),L("The weekly check runs, but macOS will not show its alerts. Turn on notifications for Avakasha in System Settings › Notifications.","הבדיקה השבועית רצה, אבל macOS לא יציג את ההתראות שלה. מפעילים התראות עבור Avakasha ב־System Settings › Notifications.")) }
+                self?.watchTick()
+            }
+        }
+    }
+    @objc func toggleOpenAtLogin(_ sender:NSMenuItem?) {
+        guard !smokeMode, !demoMode else { return }
+        do { if SMAppService.mainApp.status == .enabled { try SMAppService.mainApp.unregister() } else { try SMAppService.mainApp.register() } }
+        catch { show(L("Could not change Open at Login","לא ניתן היה לשנות פתיחה בהתחברות"),error.localizedDescription+"\n"+L("Move Avakasha to the Applications folder and try again, or add it in System Settings › General › Login Items.","מעבירים את Avakasha לתיקיית Applications ומנסים שוב, או מוסיפים אותה ב־System Settings › General › Login Items.")) }
+        if SMAppService.mainApp.status == .requiresApproval { SMAppService.openSystemSettingsLoginItems() }
+        loginMenuItem?.state = loginEnabled ? .on : .off
+    }
+    /// Hourly: warn once a day when the startup disk runs low, and run the weekly check when it is due. Only when the user turned it on.
+    func watchTick() {
+        menuBar.refresh()
+        guard preferences.bool(forKey:"weeklyCheck"), !demoMode else { return }
+        if let startup=Volumes.mounted().first(where:\.isStartup), SpaceWatch.shouldWarnLowSpace(available:startup.available,total:startup.total,lastWarned:preferences.object(forKey:"lastLowSpaceWarning") as? Date) {
+            preferences.set(Date(),forKey:"lastLowSpaceWarning")
+            notify(startup.name+L(" is almost full"," כמעט מלא"),bytes(startup.available)+L(" free. Open Avakasha to see what can go."," פנויים. פותחים את Avakasha כדי לראות מה אפשר לפנות."))
+        }
+        if SpaceWatch.isDue(last:preferences.object(forKey:"lastWeeklyCheck") as? Date) { runWeeklyCheck(home:FileManager.default.homeDirectoryForCurrentUser) }
+    }
+    /// Measures the rebuildable known locations (names and sizes only, like Free up space), keeps the date and one total, and notifies
+    /// only when there is real space to free and it grew since last time. Nothing is moved.
+    func runWeeklyCheck(home base:URL,completion:((SpaceWatch.Report?)->Void)?=nil) {
+        guard !weeklyRunning, demoAllows(base) else { return }
+        weeklyRunning=true
+        let previous=(preferences.object(forKey:"lastWeeklyCanGo") as? NSNumber)?.int64Value, minimum=weeklyMinimum
+        watchQueue.async {
+            let token=CancellationToken()
+            // Other apps' containers are left out: reading them from an hourly timer could raise a macOS prompt nobody asked for.
+            let measured=(KnownLocations.present(in:base)+KnownLocations.cacheFolders(in:base))
+                .filter{ $0.safety == .rebuildable && !$0.relativePath.hasPrefix("Library/Containers/") && !$0.relativePath.hasPrefix("Library/Group Containers/") }
+                .map{ KnownLocations.measure($0,home:base,token:token) }
+            let paths=measured.map{ $0.location.relativePath }
+            let total=measured.filter{ m in m.error == nil && !paths.contains{ $0 != m.location.relativePath && m.location.relativePath.hasPrefix($0+"/") } }.reduce(Int64(0)){ $0+$1.bytes }
+            let report=SpaceWatch.weeklyReport(previous:previous,current:total,minimum:minimum)
+            DispatchQueue.main.async {
+                self.weeklyRunning=false
+                self.preferences.set(Date(),forKey:"lastWeeklyCheck");self.preferences.set(NSNumber(value:total),forKey:"lastWeeklyCanGo")
+                // The fresh sizes also fill Free up space and the overview, so opening the app shows them.
+                if self.freeUpPanel.home.standardizedFileURL.path == base.standardizedFileURL.path {
+                    if self.freeUpPanel.rows.isEmpty { self.freeUpPanel.reload(keepMeasurements:true) }
+                    // Only rows with no newer measurement: a row measured, moved or restored meanwhile keeps its own state.
+                    let open=Set(self.freeUpPanel.rows.filter{ $0.measurement == nil && !$0.moved }.map{ $0.location.id })
+                    measured.filter{ open.contains($0.location.id) }.forEach{ self.freeUpPanel.apply($0) };if self.overviewMode { self.refreshOverview() }
+                }
+                if case .canGo(let canGo,let grew)? = report {
+                    let body = grew.map{ L("Caches and build files grew by ","מטמונים וקובצי בנייה גדלו ב־")+bytes($0)+L(" since last week. Open Avakasha to review and move them to Trash."," מאז השבוע שעבר. פותחים את Avakasha כדי לסקור ולהעביר לפח.") }
+                        ?? L("Caches and build files the owning apps rebuild. Open Avakasha to review and move them to Trash.","מטמונים וקובצי בנייה שהאפליקציות בונות מחדש. פותחים את Avakasha כדי לסקור ולהעביר לפח.")
+                    self.notify(bytes(canGo)+L(" can go to Trash"," אפשר להעביר לפח"),body)
+                }
+                self.menuBar.refresh();completion?(report)
+            }
+        }
+    }
+    func notify(_ title:String,_ body:String) {
+        if let capture=notifyOverride { capture(title,body);return }
+        guard canNotify, !smokeMode else { return }
+        let content=UNMutableNotificationContent();content.title=title;content.body=body
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier:UUID().uuidString,content:content,trigger:nil))
+    }
+    func userNotificationCenter(_ center:UNUserNotificationCenter,didReceive response:UNNotificationResponse,withCompletionHandler completionHandler:@escaping ()->Void) {
+        DispatchQueue.main.async { self.bringToFront();if !self.busy { self.setOverview(true) } };completionHandler()
+    }
+    func userNotificationCenter(_ center:UNUserNotificationCenter,willPresent notification:UNNotification,withCompletionHandler completionHandler:@escaping (UNNotificationPresentationOptions)->Void) { completionHandler([.banner]) }
 }
 let launchArguments=ProcessInfo.processInfo.arguments
 if let index=launchArguments.firstIndex(of:"--language"), index+1<launchArguments.count, AppLanguage.supported.contains(where:{$0.0 == launchArguments[index+1]}) {

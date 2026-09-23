@@ -9,8 +9,10 @@ public struct VolumeInfo: Equatable {
     public let isInternal: Bool
     public let isRemovable: Bool
     public let isStartup: Bool
-    public init(url: URL, name: String, total: Int64, available: Int64, isInternal: Bool, isRemovable: Bool, isStartup: Bool) {
-        self.url = url; self.name = name; self.total = total; self.available = available; self.isInternal = isInternal; self.isRemovable = isRemovable; self.isStartup = isStartup
+    /// Space macOS reports it can free by itself when needed (important-usage capacity minus plain available capacity), already counted in `available`.
+    public let purgeable: Int64
+    public init(url: URL, name: String, total: Int64, available: Int64, isInternal: Bool, isRemovable: Bool, isStartup: Bool, purgeable: Int64 = 0) {
+        self.url = url; self.name = name; self.total = total; self.available = available; self.isInternal = isInternal; self.isRemovable = isRemovable; self.isStartup = isStartup; self.purgeable = purgeable
     }
     public var used: Int64 { max(0, total - available) }
     public var usedFraction: Double { total > 0 ? min(1, Double(used) / Double(total)) : 0 }
@@ -37,9 +39,10 @@ public enum Volumes {
         guard let v = try? url.resourceValues(forKeys: keys), v.volumeIsLocal ?? false, v.volumeIsBrowsable ?? true,
               let total = v.volumeTotalCapacity, total > 0 else { return nil }
         let important = v.volumeAvailableCapacityForImportantUsage ?? 0
-        let available = important > 0 ? important : Int64(v.volumeAvailableCapacity ?? 0)
+        let plain = Int64(v.volumeAvailableCapacity ?? 0)
+        let available = important > 0 ? important : plain
         let volumeURL = v.volume ?? url
         return VolumeInfo(url: volumeURL, name: v.volumeName ?? volumeURL.lastPathComponent, total: Int64(total), available: available,
-                          isInternal: v.volumeIsInternal ?? false, isRemovable: v.volumeIsRemovable ?? false, isStartup: v.volumeIsRootFileSystem ?? (volumeURL.path == "/"))
+                          isInternal: v.volumeIsInternal ?? false, isRemovable: v.volumeIsRemovable ?? false, isStartup: v.volumeIsRootFileSystem ?? (volumeURL.path == "/"), purgeable: important > plain ? important - plain : 0)
     }
 }

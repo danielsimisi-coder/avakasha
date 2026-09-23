@@ -334,6 +334,7 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         if foundHome != home.standardizedFileURL.path { foundLocations = [] }
         foundLocations = foundLocations.filter { FileManager.default.fileExists(atPath: $0.url(home: home).path) }
         let locations = KnownLocations.present(in: home) + KnownLocations.cacheFolders(in: home) + foundLocations
+        updateSystemDataCaveat()
         rows = locations.map { Row(location: $0, measurement: keepMeasurements ? old[$0.id]?.measurement : nil, moved: keepMeasurements ? (old[$0.id]?.moved ?? false) : false) }
         sortRows()
         updateDetail(); updateButtons(); onSelectionChange?()
@@ -369,6 +370,22 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         table.selectRowIndexes(indexes, byExtendingSelection: false); window?.makeFirstResponder(table)
     }
     @objc func findMore() { onFind?() }
+    var caveatText: String { caveat.stringValue }
+    /// The caveat line with this drive's numbers: purgeable space and local snapshots (names and dates only).
+    func updateSystemDataCaveat() {
+        guard let volume = Volumes.info(at: home) else { return }
+        let snapshots = LocalSnapshots.listIfInternal(volume)
+        let timeMachine = snapshots.filter(\.isTimeMachine).count, others = snapshots.count - timeMachine
+        var parts: [String] = []
+        if volume.purgeable >= 500_000_000 { parts.append(bytes(volume.purgeable) + L(" purgeable space", " מקום שניתן לפינוי")) }
+        if timeMachine > 0 { parts.append("\(timeMachine) " + (timeMachine == 1 ? L("local Time Machine snapshot", "תמונת מצב מקומית של Time Machine") : L("local Time Machine snapshots", "תמונות מצב מקומיות של Time Machine"))) }
+        var text = parts.isEmpty ? L("System Data also counts snapshots and purgeable space.", "נתוני מערכת כוללים גם תמונות מצב ומקום שניתן לפינוי.")
+            : L("System Data also counts ", "נתוני המערכת כוללים גם ") + parts.joined(separator: L(" and ", " ו־")) + L("; macOS frees them by itself.", "; ‏macOS מפנה אותם בעצמו.")
+        // Snapshots from system updates or backup apps are kept by whoever made them; they are named, never promised away.
+        if others > 0 { text += " " + L("Plus \(others) snapshot\(others == 1 ? "" : "s") from updates or backup apps.", "ועוד \(others) תמונות מצב מעדכונים או מאפליקציות גיבוי.") }
+        caveat.stringValue = text
+        caveat.toolTip = caveat.stringValue
+    }
     /// Adds what the search found as rows, already measured by the search. Returns how many are new.
     @discardableResult func addFindings(_ findings: [Finding]) -> Int {
         var added = 0
