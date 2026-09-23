@@ -82,7 +82,7 @@ The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
 | Space for Quick Look; videos play inline with always-visible controls | Side-by-side duplicate previews | Blocked restores wait for a retry and never overwrite |
 | Star important files (S); show starred only or hide them; stars never auto-select as extras and Trash warns | Type badge (image size, video length), path and "item N of M" for the selection | Current view and loaded location highlighted in the sidebar |
 | Overview at launch: used, total and free space per disk, from volume attributes only | | Whole-folder move from the map: checked, measured again, always confirmed, one Trash item, Undo but no Redo |
-| Free up space: known caches and app data explained one by one, measured when you open it, several moved in one undoable step | Five verdicts per location; only rebuildable rows can be moved | Commands are copied for you to paste; the app never runs them |
+| Free up space: known caches and app data explained one by one, measured when you open it, several moved in one undoable step; "Find more" searches the home folder for build and cache folders, data of removed apps and folders untouched for months | Five verdicts per location; only rebuildable rows can be moved | Commands are copied for you to paste; the app never runs them |
 | Command/Shift multi-selection | Select extra copies while keeping one | Undo and redo batches during this session |
 | Filter by name, type and size | Opt-in, local similar-image suggestions | Changed-file and path checks before each move |
 | Stop any scan, map or comparison with the red Stop button or Esc and keep what was found | | |
