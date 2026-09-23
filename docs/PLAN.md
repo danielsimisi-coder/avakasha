@@ -13,6 +13,6 @@
 - Remember folder and position locally; resuming is explicit.
 - Real filesystem tests use synthetic fixtures only. macOS CI runs tests and release compilation.
 - A reproducible universal app build; documented Developer ID/notarization path. Ad-hoc beta is clearly labelled.
-- Private repository and prerelease contain only the clean project, never the original workspace.
+- The repository and every release contain only the clean project, never the original workspace.
 
 Independent review is required before public release. No user's real files are modified during validation.

@@ -11,16 +11,19 @@ struct MapRow {
     var isOpenable: Bool { node.map { !$0.isPackage && !$0.isUnreadable } ?? false }
 }
 
-/// Horizontal bar showing a folder's share of its parent.
+/// Horizontal bar showing a folder's share of its parent. Grey: the accent colour is kept for selection and links, not data.
 final class ShareBar: NSView {
     var fraction: Double = 0 { didSet { needsDisplay = true; setAccessibilityValue(String(Int((fraction * 100).rounded())) + "%") } }
+    var thickness: CGFloat = 8
+    override init(frame: NSRect) { super.init(frame: frame); setAccessibilityRole(.progressIndicator) }
+    required init?(coder: NSCoder) { nil }
     override var isFlipped: Bool { true }
     override func draw(_ dirtyRect: NSRect) {
-        let track = NSRect(x: 0, y: bounds.midY - 4, width: bounds.width, height: 8)
-        NSColor.quaternaryLabelColor.setFill(); NSBezierPath(roundedRect: track, xRadius: 4, yRadius: 4).fill()
-        let width = max(fraction > 0 ? 8 : 0, track.width * CGFloat(min(max(fraction, 0), 1)))
+        let track = NSRect(x: 0, y: bounds.midY - thickness / 2, width: bounds.width, height: thickness)
+        NSColor.quaternaryLabelColor.setFill(); NSBezierPath(roundedRect: track, xRadius: thickness / 2, yRadius: thickness / 2).fill()
+        let width = max(fraction > 0 ? thickness : 0, track.width * CGFloat(min(max(fraction, 0), 1)))
         let x = userInterfaceLayoutDirection == .rightToLeft ? track.width - width : 0
-        NSColor.controlAccentColor.setFill(); NSBezierPath(roundedRect: NSRect(x: x, y: track.minY, width: width, height: 8), xRadius: 4, yRadius: 4).fill()
+        NSColor.labelColor.withAlphaComponent(0.55).setFill(); NSBezierPath(roundedRect: NSRect(x: x, y: track.minY, width: width, height: thickness), xRadius: thickness / 2, yRadius: thickness / 2).fill()
     }
 }
 
@@ -41,7 +44,7 @@ final class MapTable: NSTableView {
         guard index >= 0, index < numberOfRows else { return nil }
         if !selectedRowIndexes.contains(index) { selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false) }
         let menu = NSMenu()
-        let item = NSMenuItem(title: L("Reveal in Finder", "הצג ב־Finder"), action: #selector(revealRow(_:)), keyEquivalent: "")
+        let item = NSMenuItem(title: L("Show in Finder", "הצג ב־Finder"), action: #selector(revealRow(_:)), keyEquivalent: "")
         item.target = self; item.representedObject = index; menu.addItem(item); return menu
     }
     @objc private func revealRow(_ sender: NSMenuItem) { if let index = sender.representedObject as? Int { onReveal?(index) } }
@@ -70,7 +73,11 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
     /// Up to five of the largest files inside the folder the details describe, as "name · size" lines.
     private let detailLargest = NSTextField(wrappingLabelWithString: "")
     private let detailNotes = NSTextField(wrappingLabelWithString: "")
-    private let caveat = NSTextField(wrappingLabelWithString: L("Sizes are space allocated on disk. Hard links, APFS clones, snapshots and cloud placeholders mean moving files to Trash may free a different amount.", "הגדלים הם המקום שמוקצה בדיסק. קישורים קשיחים, שכפולי APFS, תמונות מצב וקבצי ענן שלא הורדו גורמים לכך שהעברה לפח עשויה לפנות כמות שונה."))
+    /// Warnings read in the label colour; the orange triangle beside them carries the tone.
+    private let detailNotesRow = NSStackView()
+    /// One line on screen; the full explanation opens from the ⓘ.
+    private let caveat = NSTextField(labelWithString: L("Sizes are space on disk.", "הגדלים הם מקום בדיסק."))
+    private let caveatInfo = InfoButton(L("More about sizes", "עוד על הגדלים"), L("Sizes are space allocated on disk. Hard links, APFS clones, snapshots and cloud placeholders mean moving files to Trash may free a different amount.", "הגדלים הם המקום שמוקצה בדיסק. קישורים קשיחים, שכפולי APFS, תמונות מצב וקבצי ענן שלא הורדו גורמים לכך שהעברה לפח עשויה לפנות כמות שונה."))
     private(set) var result: StorageMapResult?
     private(set) var current: StorageNode?
     private(set) var rows: [MapRow] = []
@@ -89,19 +96,19 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         for (button, en, he, symbol, action) in [(openButton, "Open folder", "פתח תיקייה", "arrow.down.right.square", #selector(openSelected)),
                                                   (reviewButton, "Review files here", "סקור קבצים כאן", "list.bullet.rectangle", #selector(reviewSelected)),
                                                   (largestButton, "Largest files", "הקבצים הגדולים ביותר", "list.number", #selector(largestTapped)),
-                                                  (rescanButton, "Rescan", "מדוד מחדש", "arrow.clockwise", #selector(rescanTapped)),
+                                                  (rescanButton, "Measure again", "מדוד מחדש", "arrow.clockwise", #selector(rescanTapped)),
                                                   (trashButton, "Move folder to Trash…", "העבר תיקייה לפח…", "trash", #selector(trashTapped))] {
             button.title = L(en, he); button.target = self; button.action = action; button.bezelStyle = .rounded
             button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil); button.imagePosition = .imageLeading
-            button.font = .systemFont(ofSize: 13, weight: .medium); button.setAccessibilityLabel(L(en, he))
+            button.font = Type.bodyMedium; button.setAccessibilityLabel(L(en, he))
         }
-        reviewButton.keyEquivalent = ""; reviewButton.toolTip = L("Show the files of this folder for review. Nothing is moved.", "הצג את קבצי התיקייה לסקירה. שום דבר לא מועבר.")
+        reviewButton.keyEquivalent = ""; reviewButton.toolTip = L("Show the files of this folder for review. Nothing is moved.", "מציג את קבצי התיקייה לסקירה. שום דבר לא מועבר.")
         openButton.toolTip = L("Return or ⌘↓ opens a folder in the map; ⌘↑ goes up.", "Return או ⌘↓ פותחים תיקייה במפה; ⌘↑ עולה רמה.")
-        largestButton.toolTip = L("Review the largest files found anywhere under the mapped folder. Nothing is moved.", "סקור את הקבצים הגדולים ביותר שנמצאו בכל מקום מתחת לתיקייה הממופה. שום דבר לא מועבר.")
+        largestButton.toolTip = L("Review the largest files found anywhere under the mapped folder. Nothing is moved.", "סקירת הקבצים הגדולים ביותר שנמצאו בכל מקום מתחת לתיקייה הממופה. שום דבר לא מועבר.")
         let spacer = NSView(); spacer.setContentHuggingPriority(.init(1), for: .horizontal)
-        rescanButton.isHidden = true; rescanButton.contentTintColor = .systemOrange
-        rescanButton.toolTip = L("Files were moved or restored since this map was measured. Measure again to update the numbers.", "קבצים הועברו או שוחזרו מאז שהמפה נמדדה. מדוד מחדש כדי לעדכן את המספרים.")
-        trashButton.contentTintColor = .systemRed
+        rescanButton.isHidden = true; rescanButton.image = symbol("arrow.clockwise", 13, .medium, color: .systemOrange) // colour on the glyph only; the word carries the meaning
+        rescanButton.toolTip = L("Files were moved or restored since this map was measured. Measure again to update the numbers.", "קבצים הועברו או שוחזרו מאז שהמפה נמדדה. מדידה מחדש מעדכנת את המספרים.")
+        trashButton.image = symbol("trash", 13, .medium, color: .systemRed)
         trashButton.toolTip = L("Measures the folder again, shows what it holds and asks before moving the whole folder to Trash. Not for bundles, hidden folders or folders with unmeasured items.", "מודד את התיקייה מחדש, מציג מה יש בה ומבקש אישור לפני העברת התיקייה כולה לפח. לא לחבילות, לתיקיות מוסתרות או לתיקיות עם פריטים שלא נמדדו.")
         let toolbar = NSStackView(views: [crumbs, spacer, rescanButton, openButton, reviewButton, largestButton, trashButton]); toolbar.spacing = 8; toolbar.alignment = .centerY
         table.onTrash = { [weak self] in self?.trashTapped() }
@@ -109,7 +116,7 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         table.rowHeight = 30; table.intercellSpacing = NSSize(width: 12, height: 4); table.usesAlternatingRowBackgroundColors = false; table.style = .inset
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle; table.allowsMultipleSelection = false
         table.setAccessibilityLabel(L("Storage map", "מפת אחסון"))
-        for (id, title, width) in [("name", L("Folder", "תיקייה"), 190.0), ("size", L("On disk", "בדיסק"), 70.0), ("share", L("Share", "חלק"), 64.0), ("notes", L("Details", "פרטים"), 150.0)] {
+        for (id, title, width) in [("name", L("Folder", "תיקייה"), 190.0), ("size", L("On disk", "בדיסק"), 70.0), ("share", L("Portion", "חלק"), 64.0), ("notes", L("Details", "פרטים"), 150.0)] {
             let c = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id)); c.title = title; c.width = width; c.minWidth = id == "share" ? 48 : 60; table.addTableColumn(c)
         }
         let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.documentView = table
@@ -124,19 +131,24 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         table.onReveal = { [weak self] index in guard let self = self, index < self.rows.count else { return }; self.onReveal?(self.rows[index].node?.url ?? self.current?.url ?? URL(fileURLWithPath: "/")) }
         table.doubleAction = #selector(openSelected); table.target = self
 
-        detailTitle.font = .systemFont(ofSize: 17, weight: .medium); detailTitle.maximumNumberOfLines = 3
-        detailPath.maximumNumberOfLines = 2; detailPath.setAccessibilityLabel(L("Folder path · click to show in Finder", "נתיב התיקייה · לחיצה מציגה ב־Finder"))
-        detailPath.onOpen = { [weak self] in guard let self = self, let node = self.selectedRow?.node ?? self.current else { return }; self.onReveal?(node.url) }
-        detailSize.font = .monospacedDigitSystemFont(ofSize: 28, weight: .semibold)
-        detailFacts.font = .systemFont(ofSize: 12); detailFacts.textColor = .secondaryLabelColor
+        detailTitle.font = Type.headline; detailTitle.maximumNumberOfLines = 3
+        detailPath.maximumNumberOfLines = 2; detailPath.setAccessibilityLabel(L("Folder path", "נתיב התיקייה")); detailPath.setAccessibilityHelp(L("Opens the folder in Finder. Right-click copies the path.", "פותח את התיקייה ב־Finder. לחיצה ימנית מעתיקה את הנתיב."))
+        detailPath.onOpen = { [weak self] in self?.revealSelected() }
+        detailSize.font = Type.display
+        detailFacts.font = Type.subhead; detailFacts.textColor = .secondaryLabelColor
         detailLargest.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular); detailLargest.textColor = .secondaryLabelColor; detailLargest.setAccessibilityLabel(L("Largest files", "הקבצים הגדולים"))
-        detailNotes.font = .systemFont(ofSize: 12); detailNotes.textColor = .systemOrange
-        caveat.font = .systemFont(ofSize: 11); caveat.textColor = .tertiaryLabelColor
-        detail.orientation = .vertical; detail.alignment = .leading; detail.spacing = 10
-        for view in [detailSize, detailTitle, detailPath, detailFacts, detailLargest, detailNotes, caveat] { detail.addArrangedSubview(view) }
-        detail.setCustomSpacing(4, after: detailTitle)
-        detail.setCustomSpacing(24, after: detailNotes)
-        for view in [detailTitle, detailPath, detailFacts, detailLargest, detailNotes, caveat] { view.widthAnchor.constraint(equalTo: detail.widthAnchor).isActive = true }
+        detailNotes.font = Type.subhead; detailNotes.textColor = .labelColor
+        let warning = NSImageView(image: symbol("exclamationmark.triangle.fill", 12, .medium) ?? NSImage()); warning.contentTintColor = .systemOrange; warning.setAccessibilityLabel(L("Warning", "אזהרה"))
+        warning.widthAnchor.constraint(equalToConstant: 16).isActive = true; warning.heightAnchor.constraint(equalToConstant: 16).isActive = true
+        detailNotesRow.addArrangedSubview(warning); detailNotesRow.addArrangedSubview(detailNotes); detailNotesRow.alignment = .top; detailNotesRow.spacing = 6
+        caveat.font = Type.subhead; caveat.textColor = .secondaryLabelColor; caveat.lineBreakMode = .byTruncatingTail; caveat.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        let caveatRow = NSStackView(views: [caveat, caveatInfo]); caveatRow.spacing = 4; caveatRow.alignment = .centerY
+        detail.orientation = .vertical; detail.alignment = .leading; detail.spacing = 8
+        for view in [detailSize, detailTitle, detailPath, detailFacts, detailLargest, detailNotesRow, caveatRow] { detail.addArrangedSubview(view) }
+        detail.setCustomSpacing(4, after: detailTitle); detail.setCustomSpacing(16, after: detailPath)
+        detail.setCustomSpacing(24, after: detailNotesRow)
+        for view in [detailTitle, detailPath, detailFacts, detailLargest, detailNotesRow, caveatRow] { view.widthAnchor.constraint(equalTo: detail.widthAnchor).isActive = true }
+        detailNotes.widthAnchor.constraint(equalTo: detailNotesRow.widthAnchor, constant: -22).isActive = true
         detail.setAccessibilityLabel(L("Folder details", "פרטי התיקייה"))
         showNothing()
     }
@@ -195,6 +207,8 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         show(parent, selecting: current); window?.makeFirstResponder(table)
     }
     @objc func reviewSelected() { if let url = reviewTarget { onReview?(url) } else { NSSound.beep() } }
+    /// Show in Finder for the selected row, or the folder on screen when nothing is selected.
+    func revealSelected() { guard let node = selectedRow?.node ?? current else { NSSound.beep(); return }; onReveal?(node.url) }
     @objc private func rescanTapped() { onRescan?() }
     /// A subfolder row that the guarded whole-folder move may consider: never the root, a bundle, a hidden or unreadable folder, or one with unmeasured items.
     var trashableFolder: StorageNode? {
@@ -228,17 +242,21 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         let row = rows[index]; let parentBytes = max(current?.bytes ?? 0, 1)
         switch tableColumn?.identifier.rawValue {
         case "size":
-            let v = NSTextField(labelWithString: bytes(row.bytes)); v.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular); v.textColor = .secondaryLabelColor; v.alignment = .right; return v
+            let v = NSTextField(labelWithString: bytes(row.bytes)); v.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular); v.textColor = .secondaryLabelColor; v.alignment = .right
+            let cell = NSStackView(views: [v]); cell.alignment = .centerY; v.widthAnchor.constraint(equalTo: cell.widthAnchor).isActive = true; return cell
         case "share":
-            let bar = ShareBar(); bar.fraction = Double(row.bytes) / Double(parentBytes); bar.setAccessibilityLabel(L("Share of this folder", "חלק מהתיקייה")); bar.setAccessibilityRole(.progressIndicator); return bar
+            let bar = ShareBar(); bar.fraction = Double(row.bytes) / Double(parentBytes); bar.setAccessibilityLabel(L("Portion of this folder", "חלק מהתיקייה")); return bar
         case "notes":
-            let v = NSTextField(labelWithString: notes(for: row)); v.font = .systemFont(ofSize: 11); v.textColor = row.node?.hasCaveats == true ? .systemOrange : .secondaryLabelColor; v.lineBreakMode = .byTruncatingTail; return v
+            let v = NSTextField(labelWithString: notes(for: row)); v.font = Type.caption; v.textColor = .secondaryLabelColor; v.lineBreakMode = .byTruncatingTail
+            let cell = NSStackView(views: [v]); cell.alignment = .centerY; v.widthAnchor.constraint(equalTo: cell.widthAnchor).isActive = true; return cell
         default:
-            let symbol = row.node.map { $0.isUnreadable ? "lock.fill" : ($0.isPackage ? "shippingbox" : ($0.isHidden ? "eye.slash" : "folder.fill")) } ?? "doc.on.doc"
-            let icon = NSImageView(image: NSImage(systemSymbolName: symbol, accessibilityDescription: nil) ?? NSImage())
-            icon.contentTintColor = row.node?.isUnreadable == true ? .systemOrange : (row.isFolder ? .controlAccentColor : .secondaryLabelColor)
+            let name = row.node.map { $0.isUnreadable ? "lock.fill" : ($0.isPackage ? "shippingbox" : ($0.isHidden ? "eye.slash" : "folder.fill")) } ?? "doc.on.doc"
+            let icon = NSImageView(image: symbol(name, 14) ?? NSImage())
+            icon.contentTintColor = row.node?.isUnreadable == true ? .systemOrange : .secondaryLabelColor // folders are grey; orange marks the one state that matters
+            let meaning: String? = row.node.map { $0.isUnreadable ? L("Not accessible", "לא נגיש") : ($0.isPackage ? L("Bundle", "חבילה") : ($0.isHidden ? L("Hidden folder", "תיקייה מוסתרת") : L("Folder", "תיקייה"))) }
+            if let meaning = meaning { icon.setAccessibilityLabel(meaning) } else { icon.setAccessibilityElement(false) }
             icon.widthAnchor.constraint(equalToConstant: 18).isActive = true; icon.heightAnchor.constraint(equalToConstant: 18).isActive = true
-            let v = NSTextField(labelWithString: row.title); v.font = .systemFont(ofSize: 13, weight: .medium); v.lineBreakMode = .byTruncatingMiddle
+            let v = NSTextField(labelWithString: row.title); v.font = Type.bodyMedium; v.lineBreakMode = .byTruncatingMiddle
             if !row.isFolder { v.textColor = .secondaryLabelColor }
             let cell = NSStackView(views: [icon, v]); cell.spacing = 9; cell.toolTip = row.node?.url.path ?? current?.url.path; return cell
         }
@@ -256,14 +274,14 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         if node.isHidden { parts.append(L("Hidden", "מוסתר")) }
         if !node.isUnreadable && node.inaccessible > 0 { parts.append("\(node.inaccessible) " + L("not accessible", "לא נגישים")) }
         if node.notDownloaded > 0 { parts.append("\(node.notDownloaded) " + L("not downloaded", "לא הורדו")) }
-        if node.otherVolumes > 0 { parts.append(L("Other volume skipped", "כונן אחר דולג")) }
+        if node.otherVolumes > 0 { parts.append(L("Other drive skipped", "כונן אחר דולג")) }
         return parts.joined(separator: " · ")
     }
     private func updateDetail() {
         guard let current = current else {
             detailSize.stringValue = ""; detailTitle.stringValue = L("Where is the space?", "איפה המקום?")
-            detailFacts.stringValue = L("Map a folder or drive to see which folders fill it, then review the files inside.", "מפה תיקייה או כונן כדי לראות אילו תיקיות ממלאות אותו, ואז סקור את הקבצים שבפנים.")
-            detailNotes.stringValue = ""; detailNotes.isHidden = true; detailPath.stringValue = ""; detailPath.isHidden = true; detailLargest.stringValue = ""; detailLargest.isHidden = true; return
+            detailFacts.stringValue = L("Map a folder or drive to see which folders fill it, then review the files inside.", "ממפים תיקייה או כונן כדי לראות אילו תיקיות ממלאות אותו, ואז סוקרים את הקבצים שבפנים.")
+            detailNotes.stringValue = ""; detailNotesRow.isHidden = true; detailPath.stringValue = ""; detailPath.isHidden = true; detailLargest.stringValue = ""; detailLargest.isHidden = true; return
         }
         let row = selectedRow; let node = row?.node ?? current
         let root = result?.root
@@ -286,9 +304,9 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         if node.isHidden { notes.append(L("Hidden folder. System and app data often live here; review with care.", "תיקייה מוסתרת. לרוב מכילה נתוני מערכת ואפליקציות; יש לסקור בזהירות.")) }
         if !node.isUnreadable && node.inaccessible > 0 { notes.append("\(node.inaccessible) " + L("items could not be read and are not counted.", "פריטים לא נקראו ואינם נספרים.")) }
         if node.notDownloaded > 0 { notes.append("\(node.notDownloaded) " + L("cloud items are not downloaded and take no local space.", "פריטי ענן לא הורדו ואינם תופסים מקום מקומי.")) }
-        if node.otherVolumes > 0 { notes.append("\(node.otherVolumes) " + L("mount points for other volumes were not entered.", "נקודות עיגון של כוננים אחרים לא נסרקו.")) }
-        if let result = result, node === result.root, result.cancelled { notes.append(L("Mapping was cancelled; totals are partial.", "המיפוי בוטל; הסכומים חלקיים.")) }
-        detailNotes.stringValue = notes.joined(separator: "\n"); detailNotes.isHidden = notes.isEmpty
+        if node.otherVolumes > 0 { notes.append("\(node.otherVolumes) " + L("mount points for other drives were skipped.", "נקודות עיגון של כוננים אחרים דולגו.")) }
+        if let result = result, node === result.root, result.cancelled { notes.append(L("Mapping was stopped; totals are partial.", "המיפוי נעצר; הסכומים חלקיים.")) }
+        detailNotes.stringValue = notes.joined(separator: "\n"); detailNotesRow.isHidden = notes.isEmpty
     }
     private func updateButtons() {
         openButton.isEnabled = selectedRow?.isOpenable == true

@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/avakasha-storage-map.png" alt="Avakasha storage map — actual app with generated demo files" width="100%"></p>
+<p align="center"><img src="assets/avakasha-overview.png" alt="Avakasha overview: drives, this session and where to start (actual app, generated demo)" width="100%"></p>
 
 <p align="center">
   <a href="https://github.com/danielsimisi-coder/avakasha/actions/workflows/ci.yml"><img alt="macOS checks" src="https://github.com/danielsimisi-coder/avakasha/actions/workflows/ci.yml/badge.svg"></a>
@@ -28,6 +28,8 @@ In one sentence: Avakasha is a Mac app that helps you free up space by showing w
 **Overview.** The app opens on an overview: each local disk with used, total and free space and a share bar, what this session has moved to Trash so far, and three ways to start (map the home folder, map a folder or drive, open Trash in Finder). The numbers come from volume attributes only; nothing inside a volume is listed until you choose a location. Free space is what you can still write, so Trash does not count as free until you empty it. The sidebar highlights the view you are in: Overview, Storage map, Free up space, Older files, Installers or the loaded location.
 
 ## Where is the space?
+
+![Storage map with generated demo files](assets/avakasha-storage-map.png)
 
 Click **Storage map…** in the sidebar and choose a folder or a drive (your home folder is a good start). Avakasha measures every folder below it and lists them largest first, with a share bar and notes. Open a folder to go deeper; press **Review files here** to switch to the file review of that folder, sorted by size. **Back to files** returns to the list, and **Storage map** in the header jumps back to the map at the folder you are reviewing, without measuring again. After you move or restore files the map shows a **Rescan** button and says its numbers are out of date; Refresh in the header does the same.
 
@@ -99,7 +101,7 @@ The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
 
 **Reviewed and kept.** Press **K** to mark the selected files as reviewed and kept, or use **Keep & next** to mark the highlighted file and move on; a green check takes the place of the empty star (a star, set with **S**, still shows first). Click the check or press K again to clear it. The mark is kept by this app only, by path together with the file's size and modification time, so a file rewritten later shows up as new again. The star filter gains **Not yet reviewed** and **Reviewed only**; under Not yet reviewed, Keep & next removes the kept file from the list and the next one takes its row. Moving a file to Trash forgets its mark. A mark is a note, not a lock: it never prevents Trash.
 
-**Signing status:** the initial private beta is ad-hoc signed, **not Apple-notarized**. Gatekeeper may block a downloaded build. Do not disable Gatekeeper; building from source is the alternative until a Developer ID-signed, notarized release is available. See [distribution instructions](docs/DISTRIBUTION.md).
+**Signing status:** the beta is ad-hoc signed, **not Apple-notarized**, and the project ships as source on GitHub. Gatekeeper may block a downloaded build. Do not disable Gatekeeper; building from source is the alternative until a Developer ID-signed, notarized release is available. See [distribution instructions](docs/DISTRIBUTION.md).
 
 ## Keyboard controls
 
@@ -184,7 +186,7 @@ docs/                    Privacy, safety, release and contributor guidance
 
 ## Status and contribution
 
-This is beta 9. Code compilation and automated tests are not substitutes for testing on every macOS version. The Intel slice is cross-built; real Intel-machine verification and clean-Mac Gatekeeper verification are release checklist items, not implied claims.
+This is beta 10. Code compilation and automated tests are not substitutes for testing on every macOS version. The Intel slice is cross-built; real Intel-machine verification and clean-Mac Gatekeeper verification are release checklist items, not implied claims.
 
 The interface is English by default. **Avakasha › Language › עברית** switches the whole app to Hebrew with right-to-left layout on the next launch (the choice is stored for this app only). Contributions to accessibility, localisation and synthetic-fixture coverage are welcome. See [CONTRIBUTING](CONTRIBUTING.md), [SECURITY](SECURITY.md), and [CHANGELOG](CHANGELOG.md).
 

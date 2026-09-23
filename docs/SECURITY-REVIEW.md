@@ -1,4 +1,4 @@
-# Private beta security review
+# Beta security review
 
 ## Scope
 
@@ -15,7 +15,7 @@ Application source, packaging, CI, every reachable Git blob and the built univer
 
 ## Remaining boundaries
 
-This is a private beta, not a certification of zero vulnerabilities. Path-based Trash/Undo cannot eliminate all hostile concurrent filesystem races; important data still needs backups. Quick Look and image decoders are OS components. Cloud-folder deletions may sync; removing app media may break references. Undo is session-local. UserDefaults stores chosen paths locally. Similarity is a suggestion and never automatically selects files for deletion.
+This is a beta, not a certification of zero vulnerabilities. Path-based Trash/Undo cannot eliminate all hostile concurrent filesystem races; important data still needs backups. Quick Look and image decoders are OS components. Cloud-folder deletions may sync; removing app media may break references. Undo is session-local. UserDefaults stores chosen paths locally. Similarity is a suggestion and never automatically selects files for deletion.
 
 Developer ID signing, Apple notarization, clean-Mac Gatekeeper testing, Intel runtime testing and broader permission/filesystem/accessibility acceptance remain necessary before a supported public release. External GLM review was not used; a full Coverloop external-review pass is not claimed.
 
@@ -33,7 +33,7 @@ An independent adversarial pass (separate Claude context, read-only on the repos
 - **Confirmed safe:** no overwrite on Undo or Retry in either order of conflicting paths, changed Trash items refused, tickets never dropped silently, earlier batches undoable behind a blocked one, Redo never adopts replacements, keepers enforced through blocked → retry → redo, histories per root, map mode cannot reach a Trash move, review from the map goes through the same root validation, symbolic links never followed, no file contents read (verified with a FIFO), no crash path in the `fts` bindings.
 - **Open, low:** a Redo entry for a file that no longer matches stays lit until a new move (pre-existing); waiting restores in another folder's history are only visible after returning to that folder; memory use of the map is roughly a few hundred bytes per folder.
 
-No release-blocking issue for a private beta was found after the fixes. No third pass is claimed.
+No release-blocking issue for a beta was found after the fixes. No third pass is claimed.
 
 ## Beta 2 focused follow-up
 

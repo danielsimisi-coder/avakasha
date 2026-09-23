@@ -1,48 +1,52 @@
 import Cocoa
 import AvakashaCore
 
-/// Home screen: how full each disk is, what this session moved to Trash, and where to start. Reads volume attributes only.
+/// Home screen: how full each drive is, what this session moved to Trash, and where to start. Reads volume attributes only.
+/// The page heading and the promise sentence live in the window header, so the panel starts straight at the drives.
 final class OverviewPanel: NSView {
     private let column = NSStackView()
     private let volumesStack = NSStackView()
+    private let sectionSession: NSTextField
     private let sessionLabel = NSTextField(wrappingLabelWithString: "")
-    private let caveat = NSTextField(wrappingLabelWithString: L("Free space is what you can still write. Trash is not free until you empty it in Finder, and APFS clones or snapshots can change what a move frees.", "מקום פנוי הוא מה שעדיין אפשר לכתוב. הפח אינו פנוי עד שמרוקנים אותו ב־Finder, ושכפולי APFS או תמונות מצב עשויים לשנות מה שהעברה מפנה."))
+    /// One line on screen, in the label colour because it is a safety statement; the full explanation opens from the ⓘ.
+    private let caveat = NSTextField(labelWithString: L("Trash is not free space until you empty it in Finder.", "הפח אינו מקום פנוי עד שמרוקנים אותו ב־Finder."))
+    private let caveatInfo = InfoButton(L("More about free space", "עוד על מקום פנוי"), L("Free space is what you can still write. Trash is not free until you empty it in Finder, and APFS clones or snapshots can change what a move frees.", "מקום פנוי הוא מה שעדיין אפשר לכתוב. הפח אינו פנוי עד שמרוקנים אותו ב־Finder, ושכפולי APFS או תמונות מצב עשויים לשנות מה שהעברה מפנה."))
     let mapHomeButton = NSButton()
     let mapDriveButton = NSButton()
     let freeUpButton = NSButton()
+    /// "Continue: ~/last folder"; hidden until a folder was reviewed once, and always in the read-only demo.
+    let continueButton = NSButton()
     var onMapHome: (() -> Void)?
     var onMapDrive: (() -> Void)?
     var onFreeUp: (() -> Void)?
+    var onContinue: (() -> Void)?
     private(set) var volumes: [VolumeInfo] = []
 
     override init(frame: NSRect) {
+        func section(_ en: String, _ he: String) -> NSTextField { let v = NSTextField(labelWithString: L(en, he)); v.font = .systemFont(ofSize: 11, weight: .semibold); v.textColor = .secondaryLabelColor; return v }
+        sectionSession = section("THIS SESSION", "ההפעלה הזו")
         super.init(frame: frame)
-        func label(_ text: String, _ size: CGFloat, _ weight: NSFont.Weight = .regular, secondary: Bool = false) -> NSTextField {
-            let v = NSTextField(labelWithString: text); v.font = .systemFont(ofSize: size, weight: weight); v.textColor = secondary ? .secondaryLabelColor : .labelColor; return v
-        }
-        let title = label(L("Your Mac", "המק שלך"), 17, .medium)
-        let subtitle = label(L("Disks now, this session, and where to start.", "הכוננים עכשיו, ההפעלה הזו, ומאיפה להתחיל."), 12, .regular, secondary: true)
-        volumesStack.orientation = .vertical; volumesStack.alignment = .leading; volumesStack.spacing = 14
-        sessionLabel.font = .systemFont(ofSize: 12); sessionLabel.textColor = .secondaryLabelColor
-        caveat.font = .systemFont(ofSize: 11); caveat.textColor = .tertiaryLabelColor
-        for (button, en, he, symbol, action) in [(mapHomeButton, "Map home folder", "מפה את תיקיית הבית", "house", #selector(mapHome)),
-                                                  (mapDriveButton, "Map a folder or drive…", "מפה תיקייה או כונן…", "externaldrive", #selector(mapDrive)),
-                                                  (freeUpButton, "Free up space", "פינוי מקום", "sparkles", #selector(freeUp))] {
+        volumesStack.orientation = .vertical; volumesStack.alignment = .leading; volumesStack.spacing = 8
+        sessionLabel.font = Type.subhead; sessionLabel.textColor = .secondaryLabelColor
+        caveat.font = Type.subhead; caveat.textColor = .labelColor; caveat.lineBreakMode = .byTruncatingTail; caveat.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        for (button, en, he, symbol, action) in [(continueButton, "Continue", "המשך", "arrow.counterclockwise", #selector(resume)),
+                                                  (freeUpButton, "Free up space", "פינוי מקום", "sparkles", #selector(freeUp)),
+                                                  (mapHomeButton, "Map home folder", "מפה את תיקיית הבית", "house", #selector(mapHome)),
+                                                  (mapDriveButton, "Map a folder or drive…", "מפה תיקייה או כונן…", "externaldrive", #selector(mapDrive))] {
             button.title = L(en, he); button.bezelStyle = .rounded; button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil); button.imagePosition = .imageLeading
-            button.font = .systemFont(ofSize: 13, weight: .medium); button.target = self; button.action = action; button.setAccessibilityLabel(L(en, he))
+            button.font = Type.bodyMedium; button.target = self; button.action = action; button.setAccessibilityLabel(L(en, he))
         }
-        let actions = NSStackView(views: [freeUpButton, mapHomeButton, mapDriveButton]); actions.spacing = 10
-        let sectionDisks = label(L("DISKS", "כוננים"), 10, .semibold, secondary: true)
-        let sectionSession = label(L("THIS SESSION", "ההפעלה הזו"), 10, .semibold, secondary: true)
-        let sectionStart = label(L("START", "התחלה"), 10, .semibold, secondary: true)
-        column.orientation = .vertical; column.alignment = .leading; column.spacing = 10
-        for v in [title, subtitle, sectionDisks, volumesStack, sectionSession, sessionLabel, sectionStart, actions, caveat] { column.addArrangedSubview(v) }
-        column.setCustomSpacing(22, after: subtitle); column.setCustomSpacing(22, after: volumesStack); column.setCustomSpacing(22, after: sessionLabel); column.setCustomSpacing(26, after: actions)
+        continueButton.isHidden = true; continueButton.lineBreakMode = .byTruncatingMiddle
+        let actions = NSStackView(views: [continueButton, freeUpButton, mapHomeButton, mapDriveButton]); actions.spacing = 8
+        let caveatRow = NSStackView(views: [caveat, caveatInfo]); caveatRow.spacing = 4; caveatRow.alignment = .centerY
+        column.orientation = .vertical; column.alignment = .leading; column.spacing = 8
+        for v in [section("DRIVES", "כוננים"), volumesStack, sectionSession, sessionLabel, section("START", "התחלה"), actions, caveatRow] { column.addArrangedSubview(v) }
+        column.setCustomSpacing(24, after: volumesStack); column.setCustomSpacing(24, after: sessionLabel); column.setCustomSpacing(24, after: actions)
         column.translatesAutoresizingMaskIntoConstraints = false; addSubview(column)
-        NSLayoutConstraint.activate([column.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 28), column.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -28),
-                                     column.topAnchor.constraint(equalTo: topAnchor, constant: 28), column.widthAnchor.constraint(lessThanOrEqualToConstant: 720),
-                                     volumesStack.widthAnchor.constraint(equalTo: column.widthAnchor), caveat.widthAnchor.constraint(equalTo: column.widthAnchor), sessionLabel.widthAnchor.constraint(equalTo: column.widthAnchor)])
-        column.widthAnchor.constraint(equalTo: widthAnchor, constant: -56).withPriority(.defaultHigh).isActive = true
+        NSLayoutConstraint.activate([column.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24), column.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -24),
+                                     column.topAnchor.constraint(equalTo: topAnchor, constant: 8), column.widthAnchor.constraint(lessThanOrEqualToConstant: 720),
+                                     volumesStack.widthAnchor.constraint(equalTo: column.widthAnchor), sessionLabel.widthAnchor.constraint(equalTo: column.widthAnchor), caveatRow.widthAnchor.constraint(equalTo: column.widthAnchor)])
+        column.widthAnchor.constraint(equalTo: widthAnchor, constant: -48).withPriority(.defaultHigh).isActive = true
         setAccessibilityLabel(L("Overview", "סקירה כללית"))
         update(sessionMoved: 0)
     }
@@ -54,22 +58,34 @@ final class OverviewPanel: NSView {
         volumesStack.arrangedSubviews.forEach { $0.removeFromSuperview() }
         for volume in volumes {
             let name = NSTextField(labelWithString: volume.name + (volume.isStartup ? " · " + L("startup disk", "דיסק האתחול") : (volume.isRemovable ? " · " + L("external", "חיצוני") : "")))
-            name.font = .systemFont(ofSize: 13, weight: .medium)
-            let numbers = NSTextField(labelWithString: L("Used ", "בשימוש ") + bytes(volume.used) + L(" of ", " מתוך ") + bytes(volume.total) + " · " + L("free ", "פנוי ") + bytes(volume.available))
+            name.font = Type.bodyMedium
+            let numbers = NSTextField(labelWithString: L("Used ", "בשימוש ") + bytes(volume.used) + L(" of ", " מתוך ") + bytes(volume.total) + " · " + bytes(volume.available) + L(" free", " פנויים"))
             numbers.font = .monospacedDigitSystemFont(ofSize: 12, weight: .regular); numbers.textColor = .secondaryLabelColor
-            let bar = ShareBar(); bar.fraction = volume.usedFraction; bar.heightAnchor.constraint(equalToConstant: 12).isActive = true
+            let bar = ShareBar(); bar.fraction = volume.usedFraction; bar.thickness = 6; bar.heightAnchor.constraint(equalToConstant: 10).isActive = true
             bar.setAccessibilityLabel(volume.name + " " + L("used", "בשימוש"))
-            let row = NSStackView(views: [name, numbers, bar]); row.orientation = .vertical; row.alignment = .leading; row.spacing = 4
-            volumesStack.addArrangedSubview(row); row.widthAnchor.constraint(equalTo: volumesStack.widthAnchor).isActive = true; bar.widthAnchor.constraint(equalTo: row.widthAnchor).isActive = true
+            let inner = NSStackView(views: [name, bar, numbers]); inner.orientation = .vertical; inner.alignment = .leading; inner.spacing = 6
+            // A plain layer-backed card pinned to its content, so its height follows the rows inside it.
+            let card = NSView(); card.wantsLayer = true; card.layer?.cornerRadius = 10; card.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
+            inner.translatesAutoresizingMaskIntoConstraints = false; card.addSubview(inner)
+            NSLayoutConstraint.activate([inner.leadingAnchor.constraint(equalTo: card.leadingAnchor, constant: 16), inner.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -16),
+                                         inner.topAnchor.constraint(equalTo: card.topAnchor, constant: 12), inner.bottomAnchor.constraint(equalTo: card.bottomAnchor, constant: -12)])
+            volumesStack.addArrangedSubview(card); card.widthAnchor.constraint(equalTo: volumesStack.widthAnchor).isActive = true
+            bar.widthAnchor.constraint(equalTo: inner.widthAnchor).isActive = true
         }
-        if volumes.isEmpty { volumesStack.addArrangedSubview(NSTextField(labelWithString: L("No volume information available.", "אין מידע על כוננים."))) }
-        sessionLabel.stringValue = sessionMoved > 0
-            ? L("Moved to Trash this session: ", "הועבר לפח בהפעלה זו: ") + bytes(sessionMoved) + " · " + L("empty Trash in Finder when you are sure.", "רוקן את הפח ב־Finder כשאתה בטוח.")
-            : L("Nothing moved to Trash yet. Start with Free up space, or map a drive to see what fills it.", "עדיין לא הועבר דבר לפח. התחל ב״פינוי מקום״, או מפה כונן כדי לראות מה ממלא אותו.")
+        if volumes.isEmpty { volumesStack.addArrangedSubview(NSTextField(labelWithString: L("No drive information available.", "אין מידע על כוננים."))) }
+        sessionLabel.stringValue = L("Moved to Trash this session: ", "הועבר לפח בהפעלה זו: ") + bytes(sessionMoved) + " · " + L("empty Trash in Finder when you are sure.", "כשברור לך שאפשר, מרוקנים את הפח ב־Finder.")
+        sectionSession.isHidden = sessionMoved <= 0; sessionLabel.isHidden = sessionMoved <= 0 // the header's promise sentence already covers "nothing moved yet"
+    }
+    /// Shows "Continue: path" when there is a last folder to go back to; nil hides the button.
+    func setContinue(_ path: String?) {
+        continueButton.isHidden = path == nil
+        continueButton.title = L("Continue: ", "המשך: ") + (path ?? ""); continueButton.toolTip = path
+        continueButton.setAccessibilityLabel(L("Continue with the last folder", "המשך עם התיקייה האחרונה") + (path.map { " · " + $0 } ?? ""))
     }
     @objc private func mapHome() { onMapHome?() }
     @objc private func mapDrive() { onMapDrive?() }
     @objc private func freeUp() { onFreeUp?() }
+    @objc private func resume() { onContinue?() }
 }
 
 private extension NSLayoutConstraint {

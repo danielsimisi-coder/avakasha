@@ -49,4 +49,4 @@ The profile must already be configured using Apple's `notarytool`. Never commit 
 - [ ] Download the actual ZIP to a clean Mac and test with Gatekeeper enabled.
 - [ ] Publish exact signing/test limitations, checksum and release notes.
 
-Keep the repository private during preparation. Changing visibility is a separate owner decision. A private beta release is not a completed public launch.
+The repository is public as of beta 10 (an owner decision, 23 September 2026); the project ships as source plus an ad-hoc signed ZIP. A beta release is not a completed public launch.
