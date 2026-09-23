@@ -155,4 +155,24 @@ final class FolderTrashTests: XCTestCase {
         try FileManager.default.removeItem(at: f)
         let retry = try XCTUnwrap(history.retryBlocked(backend: backend)); XCTAssertEqual(retry.restored.map(\.path), [f.path]); XCTAssertEqual(history.blockedCount, 0); XCTAssertEqual(history.sessionMovedBytes, 0)
     }
+    func testSeveralFoldersMoveAsOneUndoStep() throws {
+        let a = try folder("cacheA", files: 3), b = try folder("cacheB"), c = try folder("gone")
+        let history = TrashHistory(); let backend = FakeTrash(directory: trash)
+        let expectedC = try FolderTrash.check(c, root: root); try Data("x".utf8).write(to: c.appendingPathComponent("late.txt")) // changed after measuring: must not move
+        Thread.sleep(forTimeInterval: 0.05)
+        let results = history.moveFolders([(a, try FolderTrash.check(a, root: root), 300), (b, try FolderTrash.check(b, root: root), 200), (c, expectedC, 100)], root: root, backend: backend)
+        XCTAssertEqual(results.compactMap(\.ticket).count, 2); XCTAssertNotNil(results[2].failure)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: a.path)); XCTAssertFalse(FileManager.default.fileExists(atPath: b.path)); XCTAssertTrue(FileManager.default.fileExists(atPath: c.path))
+        XCTAssertEqual(history.sessionMovedBytes, 500); XCTAssertTrue(history.canUndo)
+        let undo = try XCTUnwrap(history.undo(backend: backend))
+        XCTAssertEqual(Set(undo.restored.map(\.path)), [a.path, b.path], "One Undo brings every folder of the step back")
+        XCTAssertFalse(history.canUndo); XCTAssertFalse(history.canRedo); XCTAssertEqual(history.sessionMovedBytes, 0)
+        XCTAssertEqual(try String(contentsOf: a.appendingPathComponent("file2.txt")), "f2")
+    }
+    func testNothingMovedMeansNoUndoStep() throws {
+        let a = try folder("x"); let history = TrashHistory()
+        let expected = try FolderTrash.check(a, root: root); try FileManager.default.removeItem(at: a); _ = try folder("x")
+        let results = history.moveFolders([(a, expected, 10)], root: root, backend: FakeTrash(directory: trash))
+        XCTAssertNil(results[0].ticket); XCTAssertFalse(history.canUndo); XCTAssertEqual(history.sessionMovedBytes, 0)
+    }
 }

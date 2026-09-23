@@ -62,7 +62,7 @@ Click **Free up space** in the sidebar. Avakasha lists the places from a built-i
 - **Cleared on restart**: temporary system data macOS clears by itself.
 - **Review before touching**: personal or app data that only looks like clutter (Xcode archives, WhatsApp media, Zoom data, the whole `Library/Caches`). Review it file by file or leave it.
 
-Listing reads folder names only. Sizes are measured only when you press **Measure all**; you can stop and keep what was measured. **Show in Finder** reveals any row that is still on disk. **Move to Trash…** uses the same guarded flow as the map, with your home folder as the safety root: check, fresh measurement, refusal on unmeasured items, a confirmation that is always shown, one Trash item, Undo with ⌘Z and no Redo. The app never touches Mail, Chrome profiles, Messages, backups or any other non-rebuildable row by itself. The verdict is a judgement written into the catalogue, not a guarantee; the summary line tells you how much of what was measured is data the owning apps rebuild, and you decide.
+Listing reads folder names only. Opening the screen measures each location's size (names and sizes, never contents); Esc stops and keeps what was measured. A summary on top says how much can go to Trash now, how much needs the owning app, and how much is Terminal-only. **Select all that can go** picks every rebuildable row; **Move to Trash…** moves them in one step that a single ⌘Z undoes. Rows the app will not move get one action instead: **Open Mail / Docker / Chrome…**, **Review files here**, or **Copy command & open Terminal** (the command is copied, never run). Items under 100 MB are tucked away behind **Show small items**. **Show in Finder** reveals any row that is still on disk. **Move to Trash…** uses the same guarded flow as the map, with your home folder as the safety root: check, fresh measurement, refusal on unmeasured items, a confirmation that is always shown, one Trash item, Undo with ⌘Z and no Redo. The app never touches Mail, Chrome profiles, Messages, backups or any other non-rebuildable row by itself. The verdict is a judgement written into the catalogue, not a guarantee; the summary line tells you how much of what was measured is data the owning apps rebuild, and you decide.
 
 ![File review with a Quick Look preview, generated demo files](assets/avakasha-preview.png)
 
@@ -82,7 +82,7 @@ The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
 | Space for Quick Look; videos play inline with always-visible controls | Side-by-side duplicate previews | Blocked restores wait for a retry and never overwrite |
 | Star important files (S); show starred only or hide them; stars never auto-select as extras and Trash warns | Type badge (image size, video length), path and "item N of M" for the selection | Current view and loaded location highlighted in the sidebar |
 | Overview at launch: used, total and free space per disk, from volume attributes only | | Whole-folder move from the map: checked, measured again, always confirmed, one Trash item, Undo but no Redo |
-| Free up space: known caches and app data explained one by one, measured only on request | Five verdicts per location; only rebuildable rows can be moved | Commands are copied for you to paste; the app never runs them |
+| Free up space: known caches and app data explained one by one, measured when you open it, several moved in one undoable step | Five verdicts per location; only rebuildable rows can be moved | Commands are copied for you to paste; the app never runs them |
 | Command/Shift multi-selection | Select extra copies while keeping one | Undo and redo batches during this session |
 | Filter by name, type and size | Opt-in, local similar-image suggestions | Changed-file and path checks before each move |
 | Stop any scan, map or comparison with the red Stop button or Esc and keep what was found | | |
@@ -188,7 +188,7 @@ docs/                    Privacy, safety, release and contributor guidance
 
 ## Status and contribution
 
-This is beta 10. Code compilation and automated tests are not substitutes for testing on every macOS version. The Intel slice is cross-built; real Intel-machine verification and clean-Mac Gatekeeper verification are release checklist items, not implied claims.
+This is beta 11. Code compilation and automated tests are not substitutes for testing on every macOS version. The Intel slice is cross-built; real Intel-machine verification and clean-Mac Gatekeeper verification are release checklist items, not implied claims.
 
 The interface is English by default. **Avakasha › Language › עברית** switches the whole app to Hebrew with right-to-left layout on the next launch (the choice is stored for this app only). Contributions to accessibility, localisation and synthetic-fixture coverage are welcome. See [CONTRIBUTING](CONTRIBUTING.md), [SECURITY](SECURITY.md), and [CHANGELOG](CHANGELOG.md).
 

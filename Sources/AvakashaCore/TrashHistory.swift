@@ -48,6 +48,19 @@ public final class TrashHistory {
         return result
     }
 
+    /// Moves several whole folders (each checked and measured moments before by the caller) as ONE Undo step: ⌘Z brings
+    /// all of them back together. Folders that fail are reported and simply not part of the step. Not redoable.
+    public func moveFolders(_ items: [(folder: URL, expected: FolderIdentity, bytes: Int64)], root: URL, allowHiddenAncestors: Bool = false, backend: TrashBackend = SystemTrash()) -> [FolderMoveResult] {
+        var results: [FolderMoveResult] = [], tickets: [FolderTicket] = []
+        for item in items {
+            let result = FolderTrash.move(item.folder, root: root, expected: item.expected, allowHiddenAncestors: allowHiddenAncestors, backend: backend)
+            results.append(result)
+            if let ticket = result.ticket { tickets.append(ticket); ticketBytes[ticket.trashed.path] = max(0, item.bytes); sessionMovedBytes += max(0, item.bytes) }
+        }
+        if !tickets.isEmpty { undoStack.append(UndoBatch(root: root, tickets: [], keepers: [:], folders: tickets)); redoStack.removeAll() }
+        return results
+    }
+
     /// Adds the allocated bytes of the files behind freshly created tickets; failed files never count.
     private func count(_ tickets: [RestoreTicket], from files: [FileRecord]) {
         let bytes = Dictionary(files.map { ($0.id, $0.allocatedBytes) }, uniquingKeysWith: { first, _ in first })

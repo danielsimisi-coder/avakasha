@@ -112,7 +112,9 @@ public enum KnownLocations {
             let url = caches.appendingPathComponent(name)
             var isDirectory: ObjCBool = false
             guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory), isDirectory.boolValue,
-                  (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true else { return nil }
+                  (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) != true,
+                  // macOS treats a folder named like "x.app" as a bundle, and bundles are never moved whole; do not offer one.
+                  (try? url.resourceValues(forKeys: [.isPackageKey]).isPackage) != true else { return nil }
             return KnownLocation(id: "cache." + name, relativePath: relative, category: apps, safety: .rebuildable)
         }
     }

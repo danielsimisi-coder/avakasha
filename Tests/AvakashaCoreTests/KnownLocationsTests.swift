@@ -40,15 +40,16 @@ final class KnownLocationsTests: XCTestCase {
         XCTAssertEqual(Set(present), ["xcode.derivedData", "claude.vmBundles"], "\(present)")
     }
     func testCacheFoldersListPerAppCachesButNotCuratedOrHiddenOnes() throws {
-        _ = try make("Library/Caches/com.example.app")
+        _ = try make("Library/Caches/com.example.helper")
         _ = try make("Library/Caches/com.apple.dt.Xcode")     // curated already
         _ = try make("Library/Caches/Google/Chrome")          // parent of a curated clean-inside-app entry
         _ = try make("Library/Caches/.hidden")
+        _ = try make("Library/Caches/com.vendor.tool.app")    // looks like a bundle to macOS: never offered
         let linkTarget = try make("elsewhere/linked"); try FileManager.default.createSymbolicLink(at: home.appendingPathComponent("Library/Caches/linked"), withDestinationURL: linkTarget)
         try Data("x".utf8).write(to: home.appendingPathComponent("Library/Caches/loose.txt"))
         let found = KnownLocations.cacheFolders(in: home)
-        XCTAssertEqual(found.map(\.id), ["cache.com.example.app"])
-        XCTAssertEqual(found[0].safety, .rebuildable); XCTAssertEqual(found[0].relativePath, "Library/Caches/com.example.app")
+        XCTAssertEqual(found.map(\.id), ["cache.com.example.helper"])
+        XCTAssertEqual(found[0].safety, .rebuildable); XCTAssertEqual(found[0].relativePath, "Library/Caches/com.example.helper")
         XCTAssertTrue(KnownLocations.cacheFolders(in: home.appendingPathComponent("missing")).isEmpty)
     }
     func testMeasureReportsAllocatedBytesAndErrors() throws {

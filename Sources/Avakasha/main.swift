@@ -319,7 +319,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         mapPanel.onLargest={[weak self] in self?.reviewLargestFiles()}
         overviewPanel.translatesAutoresizingMaskIntoConstraints=false;listHost.addSubview(overviewPanel,positioned:.below,relativeTo:emptyList);overviewPanel.isHidden=true
         NSLayoutConstraint.activate([overviewPanel.leadingAnchor.constraint(equalTo:listHost.leadingAnchor),overviewPanel.trailingAnchor.constraint(equalTo:listHost.trailingAnchor),overviewPanel.topAnchor.constraint(equalTo:listHost.topAnchor),overviewPanel.bottomAnchor.constraint(equalTo:listHost.bottomAnchor)])
-        overviewPanel.onMapHome={[weak self] in self?.startMap(FileManager.default.homeDirectoryForCurrentUser)}
+        overviewPanel.onMapHome={[weak self] in if let h=self?.home { self?.startMap(h) }}
         overviewPanel.onMapDrive={[weak self] in self?.chooseMapFolder()}
         overviewPanel.onFreeUp={[weak self] in self?.showFreeUp()}
         overviewPanel.onContinue={[weak self] in self?.resumeFolder()}
@@ -331,6 +331,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         NSLayoutConstraint.activate([freeUpPanel.detail.leadingAnchor.constraint(equalTo:previewHost.leadingAnchor,constant:20),freeUpPanel.detail.trailingAnchor.constraint(equalTo:previewHost.trailingAnchor,constant:-20),freeUpPanel.detail.topAnchor.constraint(equalTo:previewHost.topAnchor,constant:16)])
         freeUpPanel.onMeasure={[weak self] locations in self?.measureLocations(locations)}
         freeUpPanel.onTrash={[weak self] location,measurement in self?.trashLocation(location,measured:measurement)}
+        freeUpPanel.onTrashMany={[weak self] items in self?.trashLocations(items)}
+        freeUpPanel.onAction={[weak self] action in self?.performFreeUpAction(action)}
         freeUpPanel.onReveal={[weak self] url in self?.revealFolder(url)}
         freeUpPanel.onCopyCommand={[weak self] command in NSPasteboard.general.clearContents();NSPasteboard.general.setString(command,forType:.string);self?.status.stringValue=L("Command copied · paste it in Terminal","הפקודה הועתקה · מדביקים אותה ב־Terminal")}
         freeUpPanel.onSelectionChange={[weak self] in self?.updateEnabled()}
@@ -381,6 +383,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let actionBar=row([all,extrasButton,kindBadge,chatBadge,pathLabel,spacer(),retryButton,next,trash],10)
         let bottomBar=row([spinner,status,spacer(),selectionLabel,spaceLabel],8)
         let content=column([header,folderLabel,filters,analysis,workspace,feedbackRow,actionBar,bottomBar],16)
+        content.distribution = .fill // the workspace (lowest hugging) takes every leftover point of height, in every mode
         content.setCustomSpacing(24,after:header);content.setCustomSpacing(8,after:folderLabel);content.setCustomSpacing(8,after:filters);content.setCustomSpacing(8,after:feedbackRow)
         reviewOnlyViews=[filters,analysis,actionBar]
         let host=NSView();host.addSubview(content);content.translatesAutoresizingMaskIntoConstraints=false
@@ -400,6 +403,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let folder=container.appendingPathComponent(L("Example collection","אוסף לדוגמה"),isDirectory:true)
         do {
             try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true);demoFolder=container
+            // First thing in the demo: every home-folder feature points at the generated container, never at the real home.
+            home=container;freeUpPanel.home=container // Free up space in the demo measures the synthetic collection only
+            // A few generated catalogue folders so the demo shows every kind of row. Sizes are small; the demo shows small items.
+            for (path,size) in [("Library/Developer/Xcode/DerivedData/DemoApp",2_400_000),("Library/Application Support/Claude/vm_bundles/demo",1_800_000),(".cache/huggingface/hub",1_200_000),
+                                ("Library/Caches/com.example.browser",900_000),(".npm/_cacache",700_000),("Library/Mail/V10",500_000),("Library/Containers/com.docker.docker/Data/vms/0",1_500_000)] {
+                let dir=container.appendingPathComponent(path,isDirectory:true);try? FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
+                try? Data(repeating:0x2e,count:size).write(to:dir.appendingPathComponent("data.bin"))
+            }
+            freeUpPanel.setShowSmall(true)
             for (index,name) in ["Coastal morning.png","Coastal morning — copy.png","Mountain light.png","Weekend palette.png"].enumerated() {
                 let image=NSImage(size:NSSize(width:1200,height:900));image.lockFocus()
                 NSGradient(starting:NSColor(calibratedRed:0.77,green:0.88,blue:0.89,alpha:1),ending:NSColor(calibratedRed:0.94,green:0.88,blue:0.75,alpha:1))!.draw(in:NSRect(x:0,y:0,width:1200,height:900),angle:90)
@@ -427,7 +439,6 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             if ProcessInfo.processInfo.arguments.contains("--demo-freeup") { showFreeUp() }
             mapPanel.showsPaths=false;pathLabel.isHidden=true
             if overviewMode && !ProcessInfo.processInfo.arguments.contains("--demo-overview") { setMapMode(false) } // the demo shows the file review unless asked for the overview
-            home=container;freeUpPanel.home=container // Free up space in the demo measures the synthetic collection only
             (locationButtons+[chooseButton!]).forEach{ $0.isEnabled=false;$0.toolTip=L("Disabled in the read-only demo","מושבת בהדגמה לקריאה בלבד") }
             window.minSize=NSSize(width:1190,height:768);window.setContentSize(NSSize(width:1190,height:768));window.center() // pin the demo window size
             if ProcessInfo.processInfo.arguments.contains("--demo-map") {
@@ -563,7 +574,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     /// The standard About panel shows the bundle icon at its proper size; the version lives here, not in the title bar.
     @objc func aboutApp() {
         let credits=NSAttributedString(string:"© 2026 Daniel Siman Tov · daniel.simisi@gmail.com\n"+L("Local. Private. Yours. Nothing is deleted; files go to Trash and ⌘Z brings them back. MIT license. Not affiliated with WhatsApp or Meta.","מקומי. פרטי. שלך. שום דבר לא נמחק; קבצים עוברים לפח ו־⌘Z מחזיר אותם. רישיון MIT. ללא שיוך ל־WhatsApp או Meta."),attributes:[.font:Type.caption,.foregroundColor:NSColor.labelColor])
-        NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"Avakasha",.applicationVersion:"0.1.0 beta 10",.version:"",.credits:credits])
+        NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"Avakasha",.applicationVersion:"0.1.0 beta 11",.version:"",.credits:credits])
     }
     func show(_ title: String, _ detail: String) {
         if smokeMode { print("Alert suppressed in smoke mode: \(title) — \(detail)"); return }
@@ -644,23 +655,28 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     func announce(_ text:String) { NSAccessibility.post(element:window as Any,notification:.announcementRequested,userInfo:[.announcement:text,.priority:NSAccessibilityPriorityLevel.high.rawValue]) }
     @objc func showOverview() { guard !busy else { return };setOverview(true) }
     @objc func showFreeUp() { guard !busy else { return };setFreeUp(true) }
+    /// In the read-only demo, only the generated container may be measured; anything else is a bug and is refused.
+    var demoHomeIsSafe: Bool { guard demoMode else { return true };guard let demo=demoFolder else { return false };return home.standardizedFileURL.path.hasPrefix(demo.standardizedFileURL.path) && freeUpPanel.home.standardizedFileURL.path.hasPrefix(demo.standardizedFileURL.path) }
     func setFreeUp(_ on:Bool) {
+        if on && demoMode && !(demoFolder.map{ home.standardizedFileURL.path.hasPrefix($0.standardizedFileURL.path) } ?? false) { return }
         freeUpMode=on
         if on {
             if overviewMode { setOverview(false) };if mapMode { mapMode=false }
             reviewOnlyViews.forEach{$0.isHidden=true};scroll.isHidden=true;mapPanel.isHidden=true;mapPanel.detail.isHidden=true;overviewPanel.isHidden=true;emptyList.isHidden=true
             previewHostView.isHidden=false;previewPlaceholder.isHidden=true;primary.isHidden=true;comparison.isHidden=true;primary.previewItem=nil;comparison.previewItem=nil;stopVideo()
             freeUpPanel.home=home;freeUpPanel.reload(keepMeasurements:true);freeUpPanel.isHidden=false;freeUpPanel.detail.isHidden=false
-            headingLabel.stringValue=L("Free up space","פינוי מקום");setFolderLabel(L("Known caches and app data in your home folder · measured only when you ask","מטמונים ונתוני אפליקציות מוכרים בתיקיית הבית · נמדדים רק לפי בקשה"),path:false);hideFeedback()
+            headingLabel.stringValue=L("Free up space","פינוי מקום");setFolderLabel(L("Known caches and app data in your home folder · sizes only, never contents","מטמונים ונתוני אפליקציות מוכרים בתיקיית הבית · גדלים בלבד, אף פעם לא תוכן"),path:false);hideFeedback()
             status.stringValue = freeUpPanel.rows.isEmpty ? L("Nothing from the known list exists in this home folder.","לא נמצא כאן דבר מהרשימה המוכרת.") : "\(freeUpPanel.rows.count) "+L("known locations · press Measure all","מיקומים מוכרים · לוחצים על ״מדוד הכול״")
             updateEnabled();updateLocationHighlight();updateSpaceLabel();window.makeFirstResponder(freeUpPanel.table)
+            // Opening the screen is the request: measure what is not measured yet (Esc stops and keeps what was measured).
+            if !busy, !freeUpPanel.unmeasured.isEmpty { measureLocations(freeUpPanel.unmeasured) }
         } else {
             freeUpPanel.isHidden=true;freeUpPanel.detail.isHidden=true;previewHostView.isHidden=false
         }
     }
     /// Measures known locations one by one on the work queue; cancel keeps what was measured so far.
     func measureLocations(_ locations:[KnownLocation]) {
-        guard !busy, !locations.isEmpty else { return }
+        guard !busy, !locations.isEmpty, demoHomeIsSafe else { return }
         token=CancellationToken();let jobToken=token;let base=freeUpPanel.home;setBusy(true)
         work.async {
             var done=0
@@ -686,6 +702,82 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         let text=LocationTexts.text(for:location)
         trashFolder(location.url(home:base),root:base,title:text.title,explanation:text.what+"\n"+L("Afterwards: ","אחר כך: ")+text.next,confirmed:confirmed,fromCatalogue:true) { [weak self] in
             self?.freeUpPanel.markMoved(location)
+        }
+    }
+    /// Several rebuildable locations in one step: each is checked and measured again, one confirmation lists them all,
+    /// and a single Undo brings every moved folder back. Folders that fail a check are reported and left in place.
+    func trashLocations(_ items:[(KnownLocation,LocationMeasurement)],confirmed:Bool=false) {
+        guard !busy,!demoMode, let base=try? FileSafety.root(freeUpPanel.home) else { return }
+        var checked:[(KnownLocation,URL,FolderIdentity)]=[], refused:[String]=[]
+        for (location,_) in items where location.safety == .rebuildable {
+            let url=location.url(home:base)
+            do { checked.append((location,url,try FolderTrash.check(url,root:base,allowHiddenAncestors:true))) } catch { refused.append(LocationTexts.text(for:location).title+": "+folderErrorText(error)) }
+        }
+        guard !checked.isEmpty else { show(L("Nothing moved","שום דבר לא הועבר"),refused.joined(separator:"\n"));return }
+        token=CancellationToken();let jobToken=token;setBusy(true);status.stringValue=L("Measuring \(checked.count) folders…","מודדים \(checked.count) תיקיות…")
+        work.async {
+            var fresh:[(KnownLocation,URL,FolderIdentity,Int64)]=[], skipped:[String]=[]
+            for (location,url,identity) in checked {
+                if jobToken.isCancelled { break }
+                guard let map=try? StorageMapper.map(root:url,token:jobToken,limit:0), !map.cancelled else { continue }
+                if map.root.hasCaveats { skipped.append(LocationTexts.text(for:location).title+": "+L("holds items that could not be measured","מכיל פריטים שלא ניתן היה למדוד")) } else { fresh.append((location,url,identity,map.root.bytes)) }
+            }
+            DispatchQueue.main.async {
+                self.setBusy(false)
+                guard !jobToken.isCancelled else { self.status.stringValue=L("Stopped · nothing moved","נעצר · שום דבר לא הועבר");return }
+                guard !fresh.isEmpty else { self.show(L("Nothing moved","לא הועבר דבר"),(refused+skipped).joined(separator:"\n"));return }
+                let totalBytes=fresh.reduce(Int64(0)){$0+$1.3}
+                if !confirmed {
+                    let approved: Bool
+                    if let override=self.folderConfirmationOverride { approved=override } else if self.smokeMode { approved=true }
+                    else {
+                        let a=NSAlert();a.alertStyle = .critical;a.messageText=L("Move \(fresh.count) folders to Trash?","להעביר \(fresh.count) תיקיות לפח?")
+                        var lines=fresh.map{ "• "+LocationTexts.text(for:$0.0).title+" · "+bytes($0.3) }
+                        lines.append("");lines.append(L("Total: ","סך הכול: ")+bytes(totalBytes)+" · "+L("the owning apps rebuild this data. One ⌘Z brings everything back.","האפליקציות בונות את הנתונים האלה מחדש. ⌘Z אחד מחזיר הכול."))
+                        if !(refused+skipped).isEmpty { lines.append("");lines.append(L("Not included: ","לא נכלל: "));lines.append(contentsOf:refused+skipped) }
+                        a.informativeText=lines.joined(separator:"\n")
+                        let move=a.addButton(withTitle:L("Move to Trash","העבר לפח"));let cancel=a.addButton(withTitle:L("Cancel","ביטול"))
+                        move.keyEquivalent="";cancel.keyEquivalent="\r";move.hasDestructiveAction=true
+                        approved = a.runModal() == .alertFirstButtonReturn
+                    }
+                    guard approved else { self.status.stringValue=L("Nothing moved","שום דבר לא הועבר");return }
+                }
+                let acting=self.historyFor(base);self.setBusy(true,cancellable:false)
+                self.work.async {
+                    let results=acting.moveFolders(fresh.map{ (folder:$0.1,expected:$0.2,bytes:$0.3) },root:base,allowHiddenAncestors:true,backend:self.trashBackend)
+                    DispatchQueue.main.async {
+                        self.setBusy(false)
+                        var moved:Int64=0,count=0,failures:[String]=[]
+                        for (index,result) in results.enumerated() {
+                            if result.ticket != nil { self.freeUpPanel.markMoved(fresh[index].0);moved+=fresh[index].3;count+=1 }
+                            else if let f=result.failure { failures.append(LocationTexts.text(for:fresh[index].0).title+": "+f.message) }
+                        }
+                        if count>0 { let text="\(count) "+L("folders moved to Trash","תיקיות הועברו לפח")+" · "+bytes(moved);self.status.stringValue=text+" · "+L("Undo with ⌘Z","ביטול עם ⌘Z");self.showFeedback(text,undoable:true);self.updateSpaceLabel();self.updateEnabled() }
+                        if !failures.isEmpty { self.show(L("Some folders were not moved","חלק מהתיקיות לא הועברו"),failures.joined(separator:"\n")) }
+                    }
+                }
+            }
+        }
+    }
+    /// What the app does for rows it will not move itself. It opens apps and screens and puts commands on the clipboard; it never runs a command.
+    func performFreeUpAction(_ action:RowAction) {
+        guard !busy else { return }
+        switch action {
+        case .openApp(let ids,let name):
+            guard !smokeMode else { status.stringValue=L("Open ","פתח את ")+name;return }
+            if let url=ids.lazy.compactMap({ NSWorkspace.shared.urlForApplication(withBundleIdentifier:$0) }).first {
+                NSWorkspace.shared.openApplication(at:url,configuration:NSWorkspace.OpenConfiguration()){ _,_ in }
+                status.stringValue=L("Opened ","נפתח ")+name+" · "+L("clean it from there, then Measure again","מנקים משם, ואז ״מדוד שוב״")
+            } else { show(name+L(" not found"," לא נמצא"),L("This app is not installed here. The folder can still be shown in Finder.","האפליקציה לא מותקנת כאן. אפשר עדיין להציג את התיקייה ב־Finder.")) }
+        case .reviewFiles(let url):
+            if FileManager.default.fileExists(atPath:url.path) { startScan(url) }
+        case .openTrash:
+            if !smokeMode { openTrash() }
+        case .terminal(let command):
+            NSPasteboard.general.clearContents();NSPasteboard.general.setString(command,forType:.string)
+            status.stringValue=L("Command copied · paste it in Terminal with ⌘V, read it, then press Return","הפקודה הועתקה · מדביקים ב־Terminal עם ⌘V, קוראים, ולוחצים Return")
+            if !smokeMode, let terminal=NSWorkspace.shared.urlForApplication(withBundleIdentifier:"com.apple.Terminal") { NSWorkspace.shared.openApplication(at:terminal,configuration:NSWorkspace.OpenConfiguration()){ _,_ in } }
+        case .none: break
         }
     }
     /// Whole-folder move from the storage map.
@@ -860,8 +952,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         spaceLabel.stringValue=text;spaceLabel.isHidden=false
         if overviewMode { overviewPanel.update(sessionMoved:totalMovedBytes) }
     }
+    /// The read-only demo may only ever read inside its generated container.
+    func demoAllows(_ url:URL) -> Bool { guard demoMode else { return true };guard let demo=demoFolder else { return false };return url.standardizedFileURL.resolvingSymlinksInPath().path.hasPrefix(demo.standardizedFileURL.resolvingSymlinksInPath().path) }
     func startScan(_ url: URL) {
-        guard !busy else{return}
+        guard !busy, demoAllows(url) else{return}
         do { activateRoot(try FileSafety.root(url)) } catch { show(L("Cannot scan this folder","לא ניתן לסרוק את התיקייה"),error.localizedDescription);return }
         reviewSource = .scan;if overviewMode { setOverview(false) };if freeUpMode { setFreeUp(false) };if mapMode { setMapMode(false) }
         let selectedRoot=root!;preferences.set(selectedRoot.path,forKey:"lastFolder");setFolderLabel(selectedRoot.path,path:true);headingLabel.stringValue=locationTitle(selectedRoot);updateLocationHighlight();hideFeedback()
@@ -934,7 +1028,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         startMap(current)
     }
     func startMap(_ url:URL) {
-        guard !busy else { return }
+        guard !busy, demoAllows(url) else { return }
         let target:URL
         do { target=try FileSafety.root(url) } catch {
             let detail = url.standardizedFileURL.path == "/" ? L("The whole startup disk cannot be mapped. Choose your home folder, a folder inside it, or an external drive.","אי אפשר למפות את כל דיסק ההפעלה. אפשר לבחור את תיקיית הבית, תיקייה בתוכה או כונן חיצוני.") : error.localizedDescription
@@ -1715,12 +1809,21 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             let fakeHome=temp.appendingPathComponent("home",isDirectory:true)
             try FileManager.default.createDirectory(at:fakeHome.appendingPathComponent("Library/Developer/Xcode/DerivedData/Proj"),withIntermediateDirectories:true)
             try Data(repeating:0x44,count:30_000).write(to:fakeHome.appendingPathComponent("Library/Developer/Xcode/DerivedData/Proj/index.bin"))
-            try FileManager.default.createDirectory(at:fakeHome.appendingPathComponent("Library/Caches/com.example.app"),withIntermediateDirectories:true)
+            try FileManager.default.createDirectory(at:fakeHome.appendingPathComponent("Library/Caches/com.example.helper"),withIntermediateDirectories:true)
             try FileManager.default.createDirectory(at:fakeHome.appendingPathComponent("Library/Mail"),withIntermediateDirectories:true)
+            freeUpPanel.setShowSmall(true) // fixture folders are tiny; the 100 MB tuck-away is checked separately below
             home=fakeHome;showFreeUp();precondition(freeUpMode && sidebarFreeUp.contentTintColor == .controlAccentColor && freeUpPanel.home.path == fakeHome.path)
-            precondition(Set(freeUpPanel.rows.map{$0.location.id}) == ["xcode.derivedData","mail","cache.com.example.app","system.caches"],"\(freeUpPanel.rows.map{$0.location.id})")
-            freeUpPanel.measureAll();settle()
+            precondition(busy,"Opening Free up space starts measuring right away")
+            precondition(Set(freeUpPanel.rows.map{$0.location.id}) == ["xcode.derivedData","mail","cache.com.example.helper","system.caches"],"\(freeUpPanel.rows.map{$0.location.id})")
+            settle()
             let derived=freeUpPanel.rows.first{$0.location.id == "xcode.derivedData"}!;let mailRow=freeUpPanel.rows.first{$0.location.id == "mail"}!
+            precondition(freeUpPanel.summaryLabel.stringValue.contains(L("Can go to Trash now: ","אפשר להעביר לפח עכשיו: ")),"Summary after measuring: \(freeUpPanel.summaryLabel.stringValue)")
+            freeUpPanel.setShowSmall(false);precondition(freeUpPanel.visible.isEmpty && !freeUpPanel.smallButton.isHidden,"Items under 100 MB are tucked away");freeUpPanel.setShowSmall(true)
+            precondition(FreeUpPanel.action(for:mailRow.location,home:fakeHome) == .openApp(bundleIDs:["com.apple.mail"],name:"Mail") && FreeUpPanel.action(for:derived.location,home:fakeHome) == .none)
+            precondition(FreeUpPanel.action(for:KnownLocations.all.first{$0.id == "npm.cache"}!,home:fakeHome) == .terminal("npm cache clean --force"))
+            precondition(FreeUpPanel.action(for:freeUpPanel.rows.first{$0.location.id == "system.caches"}!.location,home:fakeHome) == .reviewFiles(fakeHome.appendingPathComponent("Library/Caches",isDirectory:true).standardizedFileURL))
+            let freeUpBoard=NSPasteboard.general.string(forType:.string);performFreeUpAction(.terminal("npm cache clean --force"));precondition(NSPasteboard.general.string(forType:.string) == "npm cache clean --force","The command is copied, never run")
+            NSPasteboard.general.clearContents();if let b=freeUpBoard { NSPasteboard.general.setString(b,forType:.string) }
             precondition(derived.measurement?.error == nil && (derived.measurement?.bytes ?? 0) >= 30_000 && mailRow.measurement?.error == nil && mailRow.measurement?.files == 0)
             precondition(!derived.location.url(home:freeUpPanel.home).path.hasPrefix(FileManager.default.homeDirectoryForCurrentUser.path+"/Library"),"The smoke must never measure the real home folder")
             freeUpPanel.table.selectRowIndexes(IndexSet(integer:freeUpPanel.rows.firstIndex{$0.location.id == "mail"}!),byExtendingSelection:false);precondition(!freeUpPanel.trashButton.isEnabled,"Mail is never offered for Trash")
@@ -1732,7 +1835,16 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(!FileManager.default.fileExists(atPath:derivedURL.path) && freeUpPanel.rows.first{$0.location.id == "xcode.derivedData"}!.moved && historyFor(homeRoot).sessionMovedBytes >= 30_000 && activeHistory === historyFor(homeRoot) && undoButton.isEnabled && !redoButton.isEnabled,"Known location moved as one folder; Undo follows the free-up root")
             undoTrash();settle()
             precondition(FileManager.default.fileExists(atPath:derivedURL.appendingPathComponent("Proj/index.bin").path) && !freeUpPanel.rows.first{$0.location.id == "xcode.derivedData"}!.moved && freeUpPanel.rows.first{$0.location.id == "xcode.derivedData"}!.measurement == nil,"Undo brings the folder back and asks to measure again")
-            setFreeUp(false);home=FileManager.default.homeDirectoryForCurrentUser;freeUpPanel.home=home;try FileManager.default.removeItem(at:fakeHome)
+            // Several rows in one step: both rebuildable rows go together, Mail is never included, one Undo brings both back.
+            settle();freeUpPanel.measureAll();settle()
+            freeUpPanel.selectRebuildable();precondition(freeUpPanel.selectedRows.count == 2 && freeUpPanel.selectedRows.allSatisfy(FreeUpPanel.movable) && freeUpPanel.trashButton.title.contains("2"),"Select all that can go: \(freeUpPanel.selectedRows.map{$0.location.id})")
+            let appCache=fakeHome.appendingPathComponent("Library/Caches/com.example.helper")
+            freeUpPanel.table.selectRowIndexes(IndexSet(freeUpPanel.visible.indices),byExtendingSelection:false);freeUpPanel.trashSelected();settle();settle()
+            precondition(!FileManager.default.fileExists(atPath:derivedURL.path) && !FileManager.default.fileExists(atPath:appCache.path) && FileManager.default.fileExists(atPath:fakeHome.appendingPathComponent("Library/Mail").path),"Only rebuildable rows moved")
+            precondition(freeUpPanel.rows.filter{$0.moved}.count == 2 && feedback.stringValue.hasPrefix("2 "),"Feedback names the folder count: \(feedback.stringValue)")
+            undoTrash();settle()
+            precondition(FileManager.default.fileExists(atPath:derivedURL.path) && FileManager.default.fileExists(atPath:appCache.path) && !activeHistory.canUndo,"One Undo brings every folder of the step back")
+            setFreeUp(false);freeUpPanel.setShowSmall(false);home=FileManager.default.homeDirectoryForCurrentUser;freeUpPanel.home=home;try FileManager.default.removeItem(at:fakeHome)
             let savedRoot=root!;activateRoot(temp.appendingPathComponent("other"));precondition(!history.canUndo && !history.canRedo);activateRoot(savedRoot);precondition(history.canRedo)
             toggleTrashConfirmation(confirmationMenuItem!);precondition(!preferences.bool(forKey:"skipTrashConfirmation"))
             let languageItems=languageMenuItem!.submenu!.items;precondition(languageItems.map{$0.representedObject as? String} == ["en","he"] && languageItems[0].state == .on)

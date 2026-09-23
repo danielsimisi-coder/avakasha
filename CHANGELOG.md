@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.0-beta.11
+
+- Free up space measures as soon as it opens (names and sizes only; Esc stops) and shows a summary: how much can go to Trash now, how much needs the owning app, how much is Terminal-only, how much to review.
+- Select several rebuildable rows, or "Select all that can go", and move them in one step; one ⌘Z brings them all back.
+- Every other row gets one action: open the owning app (Mail, Docker, OrbStack, Chrome, Safari, Messages, Premiere, Xcode, Finder for iPhone backups), review its files in Avakasha, open Trash, or copy the command and open Terminal. Commands are copied, never run.
+- Items under 100 MB are tucked away behind "Show small items".
+- Cache folders whose names make macOS treat them as bundles are no longer offered, since bundles are never moved whole.
+- The read-only demo can never read outside its generated folder: scans, maps and Free up space are refused elsewhere.
+- The workspace always fills the window height.
+
 ## 0.1.0-beta.10
 
 - Fix a small unfilled spot in the app icon's sun.

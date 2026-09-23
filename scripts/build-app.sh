@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-version="${VERSION:-0.1.0-beta.10}"
+version="${VERSION:-0.1.0-beta.11}"
 build_root="${BUILD_ROOT:-.build/distribution}"
 dist_dir="${DIST_DIR:-dist}"
 mkdir -p "$build_root" "$dist_dir"
@@ -28,7 +28,7 @@ strip -S "$app/Contents/MacOS/Avakasha"
 /usr/libexec/PlistBuddy -c 'Add :CFBundleLocalizations array' -c 'Add :CFBundleLocalizations:0 string en' -c 'Add :CFBundleLocalizations:1 string he' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :CFBundlePackageType string APPL' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string ${version%%-*}" "$app/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c 'Add :CFBundleVersion string 10' "$app/Contents/Info.plist"
+/usr/libexec/PlistBuddy -c 'Add :CFBundleVersion string 11' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :LSMinimumSystemVersion string 13.0' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :NSHighResolutionCapable bool true' "$app/Contents/Info.plist"
 if [ -f assets/AppIcon.icns ]; then

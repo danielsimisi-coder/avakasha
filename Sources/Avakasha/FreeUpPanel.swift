@@ -97,10 +97,49 @@ final class FreeUpTable: NSTableView {
 }
 
 /// "Free up space": the places macOS lumps into System Data, explained one by one. Sizes are measured on request only.
+/// What the app can do for a row it will not move itself: take you to the right app or screen, or hand you the command.
+enum RowAction: Equatable {
+    case openApp(bundleIDs: [String], name: String)
+    case reviewFiles(URL)
+    case openTrash
+    case terminal(String)
+    case none
+}
+
 final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
     struct Row { let location: KnownLocation; var measurement: LocationMeasurement?; var moved = false }
+    static func action(for location: KnownLocation, home: URL) -> RowAction {
+        switch location.id {
+        case "docker.vms": return .openApp(bundleIDs: ["com.docker.docker"], name: "Docker")
+        case "orbstack", "orbstack.data": return .openApp(bundleIDs: ["dev.kdrag0n.MacVirt"], name: "OrbStack")
+        case "adobe.common": return .openApp(bundleIDs: ["com.adobe.PremierePro.26", "com.adobe.PremierePro.25", "com.adobe.PremierePro.24", "com.adobe.AfterEffects"], name: "Premiere Pro")
+        case "chrome", "chrome.cache": return .openApp(bundleIDs: ["com.google.Chrome"], name: "Chrome")
+        case "safari.cache": return .openApp(bundleIDs: ["com.apple.Safari"], name: "Safari")
+        case "messages.attachments": return .openApp(bundleIDs: ["com.apple.MobileSMS"], name: "Messages")
+        case "mail": return .openApp(bundleIDs: ["com.apple.mail"], name: "Mail")
+        case "iphone.backups": return .openApp(bundleIDs: ["com.apple.finder"], name: "Finder")
+        case "xcode.archives": return .openApp(bundleIDs: ["com.apple.dt.Xcode"], name: "Xcode")
+        case "trash": return .openTrash
+        case "whatsapp.media": return .reviewFiles(location.url(home: home))
+        default: break
+        }
+        switch location.safety {
+        case .commandOnly: return location.command.map { .terminal($0) } ?? .none
+        case .keepOrReview: return .reviewFiles(location.url(home: home))
+        default: return .none
+        }
+    }
     let table = FreeUpTable()
     let measureButton = NSButton(), trashButton = NSButton(), revealButton = NSButton(), copyButton = NSButton()
+    /// One button that does the right thing for the selected row when the app will not move it: open its app, review its files, or copy the command and open Terminal.
+    let actionButton = NSButton()
+    /// Summary card on top: how much can go now, how much needs its app or Terminal.
+    let summaryLabel = NSTextField(wrappingLabelWithString: "")
+    let selectRebuildableButton = NSButton(), smallButton = NSButton()
+    /// Rows measured below this size are tucked away until "Show small items".
+    var minimumVisibleBytes: Int64 = 100_000_000
+    private(set) var showSmall = false
+    private(set) var visible: [Row] = []
     let detail = NSStackView()
     private let detailTitle = NSTextField(wrappingLabelWithString: ""), detailSize = NSTextField(labelWithString: ""), detailSafety = NSTextField(labelWithString: "")
     /// Under the big number: "Not measured yet", "Not measurable" or "Moved to Trash", so the display slot only ever holds a size or a dash.
@@ -110,11 +149,13 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private let detailCommand = NSTextField(wrappingLabelWithString: "")
     /// One line on screen; the full explanation opens from the ⓘ.
     private let caveat = NSTextField(labelWithString: L("System Data also counts snapshots and purgeable space.", "נתוני מערכת כוללים גם תמונות מצב ומקום שניתן לפינוי."))
-    private let caveatInfo = InfoButton(L("More about System Data", "עוד על נתוני המערכת"), L("System Data in macOS Storage also counts local Time Machine snapshots and purgeable space, which no file move changes: they shrink on their own or after a restart. Nothing here is measured until you ask, and nothing is moved without a confirmation.", "נתוני מערכת (System Data) בהגדרות האחסון של macOS כוללים גם תמונות מצב מקומיות של Time Machine ומקום שניתן לפינוי, ששום העברת קבצים לא משנה: הם מצטמצמים לבד או אחרי אתחול. שום דבר כאן לא נמדד בלי בקשה מפורשת, ושום דבר לא מועבר בלי אישור."))
+    private let caveatInfo = InfoButton(L("More about System Data", "עוד על נתוני המערכת"), L("System Data in macOS Storage also counts local Time Machine snapshots and purgeable space, which no file move changes: they shrink on their own or after a restart. Sizes are measured when you open this screen (names and sizes only, never contents), and nothing is moved without a confirmation.", "נתוני מערכת (System Data) בהגדרות האחסון של macOS כוללים גם תמונות מצב מקומיות של Time Machine ומקום שניתן לפינוי, ששום העברת קבצים לא משנה: הם מצטמצמים לבד או אחרי אתחול. הגדלים נמדדים כשפותחים את המסך הזה (שמות וגדלים בלבד, אף פעם לא תוכן), ושום דבר לא מועבר בלי אישור."))
     private(set) var rows: [Row] = []
     var home: URL = FileManager.default.homeDirectoryForCurrentUser
     var onMeasure: (([KnownLocation]) -> Void)?
     var onTrash: ((KnownLocation, LocationMeasurement) -> Void)?
+    var onTrashMany: (([(KnownLocation, LocationMeasurement)]) -> Void)?
+    var onAction: ((RowAction) -> Void)?
     var onReveal: ((URL) -> Void)?
     var onCopyCommand: ((String) -> Void)?
     var onSelectionChange: (() -> Void)?
@@ -130,21 +171,35 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
             button.font = Type.bodyMedium; button.setAccessibilityLabel(L(en, he))
         }
         trashButton.image = symbol("trash", 13, .medium, color: .systemRed) // red on the glyph only
+        for (button, en, he, action) in [(selectRebuildableButton, "Select all that can go", "בחר את כל מה שאפשר לפנות", #selector(selectRebuildable)),
+                                          (smallButton, "Show small items", "הצג פריטים קטנים", #selector(toggleSmall))] {
+            button.title = L(en, he); button.target = self; button.action = action; button.bezelStyle = .rounded; button.controlSize = .small; button.font = Type.caption; button.setAccessibilityLabel(L(en, he))
+        }
+        actionButton.target = self; actionButton.action = #selector(performRowAction); actionButton.bezelStyle = .rounded; actionButton.font = Type.bodyMedium; actionButton.imagePosition = .imageLeading; actionButton.isHidden = true
+        summaryLabel.font = Type.body; summaryLabel.textColor = .labelColor; summaryLabel.setAccessibilityLabel(L("Summary", "סיכום"))
         trashButton.toolTip = L("Moves this folder to Trash after measuring it again and confirming. Only for data the owning app rebuilds.", "מעביר את התיקייה לפח אחרי מדידה מחדש ואישור. רק לנתונים שהאפליקציה בונה מחדש.")
         measureButton.toolTip = L("Measures every listed location. Reads names and sizes only.", "מודד את כל המיקומים ברשימה. קורא רק שמות וגדלים.")
         let spacer = NSView(); spacer.setContentHuggingPriority(.init(1), for: .horizontal)
-        let toolbar = NSStackView(views: [measureButton, spacer, revealButton, copyButton, trashButton]); toolbar.spacing = 8; toolbar.alignment = .centerY
+        let toolbar = NSStackView(views: [measureButton, spacer, revealButton, actionButton, trashButton]); toolbar.spacing = 8; toolbar.alignment = .centerY
+        copyButton.isHidden = true // folded into the row action ("Copy command & open Terminal")
+        let summaryButtons = NSStackView(views: [selectRebuildableButton, smallButton]); summaryButtons.spacing = 8
+        let summaryCard = NSStackView(views: [summaryLabel, summaryButtons]); summaryCard.orientation = .vertical; summaryCard.alignment = .leading; summaryCard.spacing = 8
+        summaryCard.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14); summaryCard.wantsLayer = true; summaryCard.layer?.cornerRadius = 10; summaryCard.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
         table.rowHeight = 30; table.intercellSpacing = NSSize(width: 12, height: 4); table.usesAlternatingRowBackgroundColors = false; table.style = .inset
-        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle; table.allowsMultipleSelection = false
+        table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle; table.allowsMultipleSelection = true // ⌘/Shift-click several green rows, move them in one step
         table.setAccessibilityLabel(L("Free up space", "פינוי מקום"))
         for (id, title, width) in [("name", L("Location", "מיקום"), 220.0), ("size", L("On disk", "בדיסק"), 76.0), ("safety", L("Advice", "המלצה"), 150.0), ("next", L("What happens next", "מה קורה אחר כך"), 170.0)] {
             let c = NSTableColumn(identifier: NSUserInterfaceItemIdentifier(id)); c.title = title; c.width = width; c.minWidth = 56; table.addTableColumn(c)
         }
         let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.documentView = table
-        let column = NSStackView(views: [toolbar, scroll]); column.orientation = .vertical; column.alignment = .leading; column.spacing = 10
+        let column = NSStackView(views: [summaryCard, toolbar, scroll]); column.orientation = .vertical; column.alignment = .leading; column.spacing = 10
+        // The list takes the height the window gives; the card and toolbar keep their natural size.
+        column.setHuggingPriority(.init(1), for: .vertical); scroll.setContentHuggingPriority(.init(1), for: .vertical); scroll.setContentCompressionResistancePriority(.init(1), for: .vertical)
+        summaryCard.setContentHuggingPriority(.required, for: .vertical); toolbar.setContentHuggingPriority(.required, for: .vertical)
         column.translatesAutoresizingMaskIntoConstraints = false; addSubview(column)
         NSLayoutConstraint.activate([column.leadingAnchor.constraint(equalTo: leadingAnchor), column.trailingAnchor.constraint(equalTo: trailingAnchor),
                                      column.topAnchor.constraint(equalTo: topAnchor), column.bottomAnchor.constraint(equalTo: bottomAnchor),
+                                     summaryCard.widthAnchor.constraint(equalTo: column.widthAnchor), summaryLabel.widthAnchor.constraint(equalTo: summaryCard.widthAnchor, constant: -28),
                                      toolbar.widthAnchor.constraint(equalTo: column.widthAnchor), scroll.widthAnchor.constraint(equalTo: column.widthAnchor)])
         table.delegate = self; table.dataSource = self
         table.onTrash = { [weak self] in self?.trashSelected() }
@@ -169,7 +224,13 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
     }
     required init?(coder: NSCoder) { nil }
 
-    var selectedRow: Row? { table.selectedRow >= 0 && table.selectedRow < rows.count ? rows[table.selectedRow] : nil }
+    var selectedRow: Row? { table.selectedRow >= 0 && table.selectedRow < visible.count ? visible[table.selectedRow] : nil }
+    var selectedRows: [Row] { table.selectedRowIndexes.compactMap { $0 < visible.count ? visible[$0] : nil } }
+    /// Rows that can go to Trash right now: rebuildable, measured without error, not moved yet.
+    static func movable(_ row: Row) -> Bool { row.location.safety == .rebuildable && !row.moved && row.measurement != nil && row.measurement?.error == nil }
+    private func isNested(_ r: Row) -> Bool { rows.contains { o in o.location.id != r.location.id && r.location.relativePath.hasPrefix(o.location.relativePath + "/") } }
+    private func total(_ include: (Row) -> Bool) -> Int64 { rows.filter { !$0.moved && !isNested($0) && include($0) }.reduce(0) { $0 + ($1.measurement?.bytes ?? 0) } }
+    var smallCount: Int { rows.filter { !$0.moved && ($0.measurement.map { $0.error == nil && $0.bytes < minimumVisibleBytes } ?? false) }.count }
     /// Rows nested inside another listed row (per-app caches under Library/Caches) are not counted twice.
     var measuredTotal: Int64 {
         rows.filter { r in !r.moved && !rows.contains { o in o.location.id != r.location.id && r.location.relativePath.hasPrefix(o.location.relativePath + "/") } }
@@ -183,45 +244,79 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         let old = Dictionary(rows.map { ($0.location.id, $0) }, uniquingKeysWith: { a, _ in a })
         let locations = KnownLocations.present(in: home) + KnownLocations.cacheFolders(in: home)
         rows = locations.map { Row(location: $0, measurement: keepMeasurements ? old[$0.id]?.measurement : nil, moved: keepMeasurements ? (old[$0.id]?.moved ?? false) : false) }
-        sortRows(); table.reloadData(); if !rows.isEmpty, table.selectedRow < 0 { table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false) }
+        sortRows()
         updateDetail(); updateButtons(); onSelectionChange?()
     }
+    /// Keeps the table list in step with the rows: small measured items are tucked away unless asked for; unmeasured and moved rows stay visible.
+    private func refreshVisible() {
+        let selected = Set(selectedRows.map(\.location.id))
+        visible = rows.filter { r in showSmall || r.moved || r.measurement == nil || (r.measurement?.error != nil) || (r.measurement?.bytes ?? 0) >= minimumVisibleBytes }
+        table.reloadData()
+        let again = IndexSet(visible.indices.filter { selected.contains(visible[$0].location.id) })
+        if !again.isEmpty { table.selectRowIndexes(again, byExtendingSelection: false) } else if !visible.isEmpty, table.selectedRow < 0 { table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false) }
+        updateSummary()
+    }
+    func updateSummary() {
+        let measured = rows.contains { $0.measurement != nil }
+        let now = total(Self.movable), app = total { $0.location.safety == .cleanInsideApp }, command = total { $0.location.safety == .commandOnly }, review = total { $0.location.safety == .keepOrReview }
+        let count = rows.filter(Self.movable).count
+        if !measured { summaryLabel.stringValue = rows.isEmpty ? L("Nothing from the known list exists in this home folder.", "לא נמצא כאן דבר מהרשימה המוכרת.") : L("Measuring what each location takes…", "מודדים כמה מקום תופס כל מיקום…") }
+        else {
+            var parts = [L("Can go to Trash now: ", "אפשר להעביר לפח עכשיו: ") + bytes(now) + " (\(count))"]
+            if app > 0 { parts.append(L("Needs its own app: ", "דורש ניקוי מתוך האפליקציה: ") + bytes(app)) }
+            if command > 0 { parts.append(L("Via Terminal: ", "דרך Terminal: ") + bytes(command)) }
+            if review > 0 { parts.append(L("To review file by file: ", "לסקירה קובץ־קובץ: ") + bytes(review)) }
+            summaryLabel.stringValue = parts.joined(separator: "  ·  ")
+        }
+        selectRebuildableButton.isEnabled = count > 0; selectRebuildableButton.title = count > 1 ? L("Select all \(count) that can go", "בחר את כל \(count) שאפשר לפנות") : L("Select all that can go", "בחר את כל מה שאפשר לפנות")
+        let small = smallCount; smallButton.isHidden = small == 0 && !showSmall
+        smallButton.title = showSmall ? L("Hide small items", "הסתר פריטים קטנים") : L("Show \(small) small items", "הצג \(small) פריטים קטנים")
+    }
+    @objc func selectRebuildable() {
+        let indexes = IndexSet(visible.indices.filter { Self.movable(visible[$0]) })
+        guard !indexes.isEmpty else { NSSound.beep(); return }
+        table.selectRowIndexes(indexes, byExtendingSelection: false); window?.makeFirstResponder(table)
+    }
+    @objc func toggleSmall() { showSmall.toggle(); refreshVisible(); updateDetail(); updateButtons() }
+    func setShowSmall(_ on: Bool) { showSmall = on; refreshVisible() }
+    @objc func performRowAction() { guard selectedRows.count == 1, let row = selectedRow else { return }; let action = Self.action(for: row.location, home: home); if action != .none { onAction?(action) } }
     private func sortRows() {
         rows.sort { a, b in
             let ab = a.moved ? -1 : (a.measurement?.bytes ?? -1), bb = b.moved ? -1 : (b.measurement?.bytes ?? -1)
             if ab != bb { return ab > bb }
             return LocationTexts.text(for: a.location).title.localizedStandardCompare(LocationTexts.text(for: b.location).title) == .orderedAscending
         }
+        refreshVisible()
     }
     func apply(_ measurement: LocationMeasurement) {
         guard let index = rows.firstIndex(where: { $0.location.id == measurement.location.id }) else { return }
-        let selected = selectedRow?.location.id
-        rows[index].measurement = measurement; sortRows(); table.reloadData()
-        if let id = selected, let i = rows.firstIndex(where: { $0.location.id == id }) { table.selectRowIndexes(IndexSet(integer: i), byExtendingSelection: false) }
+        rows[index].measurement = measurement; sortRows()
         updateDetail(); updateButtons(); onSelectionChange?()
     }
     func markMoved(_ location: KnownLocation) {
         guard let index = rows.firstIndex(where: { $0.location.id == location.id }) else { return }
-        rows[index].moved = true; sortRows(); table.reloadData(); updateDetail(); updateButtons(); onSelectionChange?()
+        rows[index].moved = true; sortRows(); updateDetail(); updateButtons(); onSelectionChange?()
     }
-    func setEnabled(_ enabled: Bool) { table.isEnabled = enabled; if enabled { updateButtons() } else { [measureButton, trashButton, revealButton, copyButton].forEach { $0.isEnabled = false } } }
+    func setEnabled(_ enabled: Bool) { table.isEnabled = enabled; if enabled { updateButtons(); updateSummary() } else { [measureButton, trashButton, revealButton, copyButton, actionButton, selectRebuildableButton].forEach { $0.isEnabled = false } } }
     /// A folder came back from Trash: it is present again and needs measuring again.
     func restored(_ url: URL) {
         guard let index = rows.firstIndex(where: { $0.location.url(home: home).standardizedFileURL.path == url.standardizedFileURL.path }) else { return }
-        rows[index].moved = false; rows[index].measurement = nil; sortRows(); table.reloadData(); updateDetail(); updateButtons(); onSelectionChange?()
+        rows[index].moved = false; rows[index].measurement = nil; sortRows(); updateDetail(); updateButtons(); onSelectionChange?()
     }
 
     @objc func measureAll() { let pending = unmeasured; if !pending.isEmpty { onMeasure?(pending) } }
     @objc func revealSelected() { if let row = selectedRow { onReveal?(row.location.url(home: home)) } }
     @objc func copyCommand() { if let command = selectedRow?.location.command { onCopyCommand?(command) } }
     @objc func trashSelected() {
-        guard let row = selectedRow, row.location.safety == .rebuildable, !row.moved, let measurement = row.measurement, measurement.error == nil else { NSSound.beep(); return }
-        onTrash?(row.location, measurement)
+        // Only rows the catalogue marks rebuildable, measured and still on disk ever reach the guarded folder move.
+        let items = selectedRows.filter(Self.movable).compactMap { r in r.measurement.map { (r.location, $0) } }
+        guard !items.isEmpty else { NSSound.beep(); return }
+        if items.count == 1 { onTrash?(items[0].0, items[0].1) } else { onTrashMany?(items) }
     }
 
-    func numberOfRows(in tableView: NSTableView) -> Int { rows.count }
+    func numberOfRows(in tableView: NSTableView) -> Int { visible.count }
     func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row index: Int) -> NSView? {
-        let row = rows[index]; let text = LocationTexts.text(for: row.location)
+        let row = visible[index]; let text = LocationTexts.text(for: row.location)
         switch tableColumn?.identifier.rawValue {
         case "size":
             let v = NSTextField(labelWithString: row.moved ? L("moved", "הועבר") : (row.measurement.map { $0.error == nil ? bytes($0.bytes) : "?" } ?? "—"))
@@ -263,16 +358,25 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         detailNext.stringValue = L("Afterwards: ", "אחר כך: ") + text.next
         if let measurement = row.measurement, let error = measurement.error { detailHow.stringValue = error }
         else if let how = text.howTo { detailHow.stringValue = how }
-        else { detailHow.stringValue = row.location.safety == .rebuildable ? L("Measure, then Move to Trash. Undo with ⌘Z in this session.", "מודדים, ואז מעבירים לפח. אפשר לבטל עם ⌘Z בהפעלה זו.") : (row.location.safety == .commandOnly ? L("Copy the command and run it in Terminal yourself. The app never runs commands, and the tool deletes immediately, without Trash or Undo.", "מעתיקים את הפקודה ומריצים אותה ב־Terminal. האפליקציה לעולם לא מריצה פקודות, והכלי מוחק מיד, בלי פח ובלי ביטול.") : "") }
+        else { detailHow.stringValue = row.location.safety == .rebuildable ? L("Move to Trash, or select several and move them in one step. Undo with ⌘Z in this session.", "מעבירים לפח, או בוחרים כמה ומעבירים בפעם אחת. אפשר לבטל עם ⌘Z בהפעלה זו.") : (row.location.safety == .commandOnly ? L("“Copy command & open Terminal” puts the command on the clipboard and opens Terminal. Paste it, read it, then press Return. The app never runs commands, and the tool deletes immediately, without Trash or Undo.", "״העתק פקודה ופתח Terminal״ שם את הפקודה בלוח ופותח את Terminal. מדביקים, קוראים, ולוחצים Return. האפליקציה לעולם לא מריצה פקודות, והכלי מוחק מיד, בלי פח ובלי ביטול.") : "") }
         detailHow.isHidden = detailHow.stringValue.isEmpty
         detailCommand.stringValue = row.location.command.map { "  " + $0 + "  " } ?? ""; detailCommand.isHidden = row.location.command == nil
     }
     private func updateButtons() {
-        let row = selectedRow
+        let row = selectedRow, many = selectedRows.count > 1, movable = selectedRows.filter(Self.movable)
         measureButton.isEnabled = !unmeasured.isEmpty
-        revealButton.isEnabled = row != nil && row?.moved == false
-        copyButton.isEnabled = row?.location.command != nil; copyButton.isHidden = row?.location.command == nil
-        trashButton.isEnabled = row.map { $0.location.safety == .rebuildable && !$0.moved && $0.measurement != nil && $0.measurement?.error == nil } ?? false
-        trashButton.isHidden = row?.location.safety != .rebuildable
+        revealButton.isEnabled = !many && row != nil && row?.moved == false; revealButton.isHidden = many
+        trashButton.isHidden = movable.isEmpty && row?.location.safety != .rebuildable
+        trashButton.isEnabled = !movable.isEmpty
+        trashButton.title = movable.count > 1 ? L("Move \(movable.count) to Trash…", "העבר \(movable.count) לפח…") + " (" + bytes(movable.reduce(0) { $0 + ($1.measurement?.bytes ?? 0) }) + ")" : L("Move to Trash…", "העבר לפח…")
+        let action: RowAction = (!many && row?.moved == false) ? (row.map { Self.action(for: $0.location, home: home) } ?? .none) : .none
+        switch action {
+        case .openApp(_, let name): actionButton.title = L("Open ", "פתח את ") + name; actionButton.image = symbol("arrow.up.forward.app", 13)
+        case .reviewFiles: actionButton.title = L("Review files here", "סקור קבצים כאן"); actionButton.image = symbol("list.bullet.rectangle", 13)
+        case .openTrash: actionButton.title = L("Open Trash", "פתח את הפח"); actionButton.image = symbol("trash", 13)
+        case .terminal: actionButton.title = L("Copy command & open Terminal", "העתק פקודה ופתח Terminal"); actionButton.image = symbol("terminal", 13)
+        case .none: break
+        }
+        actionButton.isHidden = action == .none; actionButton.isEnabled = action != .none; actionButton.setAccessibilityLabel(actionButton.title)
     }
 }
