@@ -379,6 +379,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         freeUpPanel.onCopyCommand={[weak self] command in NSPasteboard.general.clearContents();NSPasteboard.general.setString(command,forType:.string);self?.status.stringValue=L("Command copied · paste it in Terminal","הפקודה הועתקה · מדביקים אותה ב־Terminal")}
         freeUpPanel.onSelectionChange={[weak self] in self?.updateEnabled()}
         freeUpPanel.onFind={[weak self] in self?.findMore()}
+        freeUpPanel.onReport={[weak self] location in self?.reportVerdict(location)}
         freeUpPanel.onMoveToDrive={[weak self] location in
             guard let self=self, let base=try? FileSafety.root(self.freeUpPanel.home) else { return }
             self.offloadFolder(location.url(home:base),root:base,allowHiddenAncestors:true,title:LocationTexts.text(for:location).title){ [weak self] in self?.freeUpPanel.markMoved(location) }
@@ -452,7 +453,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         do {
             try FileManager.default.createDirectory(at:folder,withIntermediateDirectories:true);demoFolder=container
             // First thing in the demo: every home-folder feature points at the generated container, never at the real home.
-            home=container;freeUpPanel.home=container // Free up space in the demo measures the synthetic collection only
+            home=container;freeUpPanel.home=container;freeUpPanel.reportsEnabled=false // Free up space in the demo measures the synthetic collection only
             // A few generated catalogue folders so the demo shows every kind of row. Sizes are small; the demo shows small items.
             for (path,size) in [("Library/Developer/Xcode/DerivedData/DemoApp",2_400_000),("Library/Application Support/Claude/vm_bundles/demo",1_800_000),(".cache/huggingface/hub",1_200_000),
                                 ("Library/Caches/com.example.browser",900_000),(".npm/_cacache",700_000),("Library/Mail/V10",500_000),("Library/Containers/com.docker.docker/Data/vms/0",1_500_000)] {
@@ -657,7 +658,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     /// The standard About panel shows the bundle icon at its proper size; the version lives here, not in the title bar.
     @objc func aboutApp() {
         let credits=NSAttributedString(string:"© 2026 Daniel Siman Tov · daniel.simisi@gmail.com\n"+L("Local. Private. Yours. Nothing is deleted; files go to Trash and ⌘Z brings them back. MIT license. Not affiliated with WhatsApp or Meta.","מקומי. פרטי. שלך. שום דבר לא נמחק; קבצים עוברים לפח ו־⌘Z מחזיר אותם. רישיון MIT. ללא שיוך ל־WhatsApp או Meta."),attributes:[.font:Type.caption,.foregroundColor:NSColor.labelColor])
-        NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"Avakasha",.applicationVersion:"0.1.0 beta 17",.version:"",.credits:credits])
+        NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"Avakasha",.applicationVersion:Self.appVersion,.version:"",.credits:credits])
     }
     func show(_ title: String, _ detail: String) {
         if smokeMode { print("Alert suppressed in smoke mode: \(title) — \(detail)"); return }
@@ -941,6 +942,47 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     /// Test hook: nil asks the user, true or false answers the folder confirmation without a dialog.
     var folderConfirmationOverride: Bool?
+
+    // MARK: Report a wrong verdict
+    /// Test hooks: the smoke test answers the report sheet and reads the URL instead of opening a browser.
+    var reportOverride:(VerdictReport.Problem,String)?
+    var lastReportURL:URL?
+    static let appVersion="0.1.0 beta 18"
+    /// The verdict in English, as maintainers read it, whatever the interface language.
+    static func englishVerdict(_ safety:CleanupSafety) -> String {
+        switch safety {
+        case .rebuildable: return "Rebuildable · can go to Trash"
+        case .cleanInsideApp: return "Clean from the app itself"
+        case .commandOnly: return "Command in Terminal"
+        case .restartClears: return "Cleared on restart"
+        case .keepOrReview: return "Review before moving"
+        }
+    }
+    func reportVerdict(_ location:KnownLocation) {
+        guard !demoMode else { return }
+        let detail = location.category == FoundLocations.rebuild ? "its name marks data that is rebuilt" : (location.category == FoundLocations.leftover ? "data of an app that seems not to be installed" : "")
+        func build(_ problem:VerdictReport.Problem,_ comment:String) -> VerdictReport {
+            VerdictReport.make(id:location.id,relativePath:location.relativePath,verdict:Self.englishVerdict(location.safety),detail:detail,problem:problem,comment:comment,
+                               appVersion:Self.appVersion,systemVersion:"macOS "+ProcessInfo.processInfo.operatingSystemVersionString)
+        }
+        if let (problem,comment)=reportOverride { lastReportURL=build(problem,comment).url;return }
+        let problems=VerdictReport.Problem.allCases
+        let titles=[L("Not safe to move: data would be lost","לא בטוח להעביר: יאבדו נתונים"),L("Could be marked safe: the app rebuilds it","אפשר לסמן כבטוח: האפליקציה בונה אותו מחדש"),L("The description or next step is wrong","התיאור או הצעד הבא שגויים"),L("Something else","משהו אחר")]
+        let a=NSAlert();a.messageText=L("Report a wrong verdict","דיווח על סיווג שגוי")
+        let intro:String=L("Avakasha opens a prefilled issue on GitHub in your browser; nothing is sent until you submit it there. It includes only:","Avakasha תפתח בדפדפן דיווח מוכן ב־GitHub; שום דבר לא נשלח עד שמגישים אותו שם. הוא כולל רק את:")
+        let place:String=VerdictReport.publicPath(id:location.id,relativePath:location.relativePath)
+        let rest:String=L("what is wrong, your note, the app and macOS versions","מה שגוי, ההערה שלך, והגרסאות של האפליקציה ושל macOS")
+        a.informativeText=[intro,"• "+place,"• "+Self.englishVerdict(location.safety),"• "+rest].joined(separator:"\n")
+        let popup=NSPopUpButton(frame:NSRect(x:0,y:30,width:340,height:26));titles.forEach{ popup.addItem(withTitle:$0) }
+        let note=NSTextField(frame:NSRect(x:0,y:0,width:340,height:24));note.placeholderString=L("What happens with this folder? (optional, public)","מה קורה עם התיקייה הזו? (לא חובה, פומבי)")
+        let box=NSView(frame:NSRect(x:0,y:0,width:340,height:58));box.addSubview(popup);box.addSubview(note);a.accessoryView=box
+        a.addButton(withTitle:L("Open in GitHub","פתח ב־GitHub"));a.addButton(withTitle:L("Cancel","ביטול"))
+        a.window.initialFirstResponder=popup
+        guard a.runModal() == .alertFirstButtonReturn else { return }
+        let report=build(problems[max(0,popup.indexOfSelectedItem)],note.stringValue)
+        NSWorkspace.shared.open(report.url)
+        status.stringValue=L("Opened a prefilled report in your browser · nothing is sent until you submit it there","נפתח דיווח מוכן בדפדפן · שום דבר לא נשלח עד שמגישים אותו שם")
+    }
 
     // MARK: Move to drive
     /// Test hooks: a folder that stands in for an external drive (same disk, so the test allows it) and a temporary index.
@@ -2197,6 +2239,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(modulesRow.location.safety == .rebuildable && FreeUpPanel.movable(modulesRow) && goneRow.location.safety == .keepOrReview && !FreeUpPanel.movable(goneRow),"Only regenerable findings can go to Trash")
             precondition(FreeUpPanel.action(for:goneRow.location,home:fakeHome) == .reviewFiles(goneRow.location.url(home:fakeHome)) && LocationTexts.text(for:goneRow.location).title.contains("GoneEditor"))
             freeUpPanel.findMore();settle();precondition(lastFindUsedMap && freeUpPanel.rows.filter{$0.location.id.hasPrefix("find.")}.count == 2,"Searching again reuses the recent map and adds nothing twice")
+            // Report a wrong verdict: the prefilled issue names the pattern, never the project or the home folder.
+            freeUpPanel.select(id:modulesRow.location.id);precondition(!freeUpPanel.reportButton.isHidden,"The report link shows for a found folder")
+            reportOverride=(.notSafe,"patched packages");reportVerdict(modulesRow.location);reportOverride=nil
+            let reportText=lastReportURL?.absoluteString.removingPercentEncoding ?? ""
+            precondition(reportText.contains("~/…/node_modules") && reportText.contains("patched packages") && !reportText.contains("Code/web") && !reportText.contains(fakeHome.path) && !reportText.contains(homeRoot.path) && lastReportURL?.host == "github.com","Report: \(reportText)")
             trashLocation(goneRow.location,measured:goneRow.measurement!,confirmed:true);precondition(FileManager.default.fileExists(atPath:gone.path),"A leftover is never moved by the app")
             trashLocation(modulesRow.location,measured:modulesRow.measurement!,confirmed:true);settle()
             precondition(!FileManager.default.fileExists(atPath:modules.path) && FileManager.default.fileExists(atPath:project.appendingPathComponent("package.json").path),"node_modules moved, the project stays")
@@ -2286,7 +2333,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(preferences.bool(forKey:"AppleTextDirection"),"Hebrew must switch the layout direction")
             chooseLanguage(languageItems[0]);precondition(preferences.stringArray(forKey:"AppleLanguages") == ["en"] && !preferences.bool(forKey:"AppleTextDirection"))
             precondition(isCurrentRoot(root!) && !isCurrentRoot(temp.appendingPathComponent("map")),"Clicking the loaded location again must not rescan")
-            print("UI smoke: storage map, largest files, installers, reviewed marks, session space summary, free-up search, overview steps, home duplicates, move to drive, weekly check, space guard, selection, old-file sorting, preview, confirmation preference, Delete, Undo, Redo, blocked-restore retry and held-key protection passed. No real files changed; no windows shown.")
+            print("UI smoke: storage map, largest files, installers, reviewed marks, session space summary, free-up search, overview steps, home duplicates, verdict reports, move to drive, weekly check, space guard, selection, old-file sorting, preview, confirmation preference, Delete, Undo, Redo, blocked-restore retry and held-key protection passed. No real files changed; no windows shown.")
             cleanup();fflush(stdout);exit(0)
         } catch { fputs("UI smoke failed: \(error)\n",stderr);cleanup();exit(1) }
     }

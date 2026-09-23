@@ -213,6 +213,11 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
     /// For folders untouched for months: copy to a drive, check, then Trash the original.
     let driveButton = NSButton()
     var onMoveToDrive: ((KnownLocation) -> Void)?
+    /// "Wrong verdict? Report it…": a prefilled GitHub issue the user reviews in their browser.
+    let reportButton = NSButton()
+    var onReport: ((KnownLocation) -> Void)?
+    /// Off in the read-only demo, where nothing leaves the app.
+    var reportsEnabled = true
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -282,7 +287,10 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         caveat.font = Type.subhead; caveat.textColor = .secondaryLabelColor; caveat.lineBreakMode = .byTruncatingTail; caveat.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         let caveatRow = NSStackView(views: [caveat, caveatInfo]); caveatRow.spacing = 4; caveatRow.alignment = .centerY
         detail.orientation = .vertical; detail.alignment = .leading; detail.spacing = 8
-        for view in [detailSize, detailState, detailTitle, detailSafetyRow, detailPath, detailWhat, detailNext, detailHow, detailCommand, caveatRow] { detail.addArrangedSubview(view) }
+        reportButton.title = L("Wrong verdict? Report it…", "סיווג שגוי? לדווח…"); reportButton.isBordered = false; reportButton.font = Type.caption; reportButton.contentTintColor = .linkColor
+        reportButton.target = self; reportButton.action = #selector(reportTapped); reportButton.setAccessibilityLabel(L("Report a wrong verdict", "דיווח על סיווג שגוי"))
+        reportButton.toolTip = L("Opens a prefilled issue on GitHub in your browser, with this entry's name and verdict only. Nothing is sent until you submit it there.", "פותח בדפדפן דיווח מוכן ב־GitHub, רק עם שם הפריט והסיווג שלו. שום דבר לא נשלח עד שמגישים אותו שם.")
+        for view in [detailSize, detailState, detailTitle, detailSafetyRow, detailPath, detailWhat, detailNext, detailHow, detailCommand, reportButton, caveatRow] { detail.addArrangedSubview(view) }
         detail.setCustomSpacing(2, after: detailSize); detail.setCustomSpacing(4, after: detailTitle); detail.setCustomSpacing(16, after: detailPath); detail.setCustomSpacing(24, after: detailCommand)
         for view in [detailTitle, detailPath, detailWhat, detailNext, detailHow, detailCommand, caveatRow] { view.widthAnchor.constraint(equalTo: detail.widthAnchor).isActive = true }
         detailPath.setAccessibilityLabel(L("Folder path", "נתיב התיקייה")); detailPath.setAccessibilityHelp(L("Opens the folder in Finder. Right-click copies the path.", "פותח את התיקייה ב־Finder. לחיצה ימנית מעתיקה את הנתיב."))
@@ -388,6 +396,7 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         table.selectRowIndexes(indexes, byExtendingSelection: false); window?.makeFirstResponder(table)
     }
     @objc func findMore() { onFind?() }
+    @objc func reportTapped() { if let row = selectedRow, selectedRows.count == 1 { onReport?(row.location) } }
     @objc func moveToDrive() { if let row = selectedRow, selectedRows.count == 1, row.location.category == FoundLocations.untouched, !row.moved { onMoveToDrive?(row.location) } }
     @objc func planTapped() {
         let text = planField.stringValue.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespaces)
@@ -506,7 +515,7 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         guard let row = selectedRow else {
             detailSize.stringValue = ""; detailState.stringValue = ""; detailState.isHidden = true; detailTitle.stringValue = L("Free up space", "פינוי מקום"); detailSafety.stringValue = ""; detailSafetyRow.isHidden = true
             detailPath.stringValue = ""; detailWhat.stringValue = rows.isEmpty ? L("Nothing from the known list exists in this home folder.", "לא נמצא כאן דבר מהרשימה המוכרת.") : L("Select a location to see what it is and what happens after it goes to Trash.", "בוחרים מיקום כדי לראות מה הוא ומה קורה אחרי שהוא עובר לפח.")
-            detailNext.stringValue = ""; detailHow.stringValue = ""; detailHow.isHidden = true; detailCommand.isHidden = true; return
+            detailNext.stringValue = ""; detailHow.stringValue = ""; detailHow.isHidden = true; detailCommand.isHidden = true; reportButton.isHidden = true; return
         }
         let text = LocationTexts.text(for: row.location)
         let size = row.measurement.map { $0.error == nil ? bytes($0.bytes) : "—" } ?? "—"
@@ -524,6 +533,7 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         else { detailHow.stringValue = row.location.safety == .rebuildable ? L("Move to Trash, or select several and move them in one step. Undo with ⌘Z in this session.", "מעבירים לפח, או בוחרים כמה ומעבירים בפעם אחת. אפשר לבטל עם ⌘Z בהפעלה זו.") : (row.location.safety == .commandOnly ? L("“Copy command & open Terminal” puts the command on the clipboard and opens Terminal. Paste it, read it, then press Return. The app never runs commands, and the tool deletes immediately, without Trash or Undo.", "״העתק פקודה ופתח Terminal״ שם את הפקודה בלוח ופותח את Terminal. מדביקים, קוראים, ולוחצים Return. האפליקציה לעולם לא מריצה פקודות, והכלי מוחק מיד, בלי פח ובלי ביטול.") : "") }
         detailHow.isHidden = detailHow.stringValue.isEmpty
         detailCommand.stringValue = row.location.command.map { "  " + $0 + "  " } ?? ""; detailCommand.isHidden = row.location.command == nil
+        reportButton.isHidden = !reportsEnabled || row.location.category == FoundLocations.untouched // your own old folders are not a catalogue question
     }
     private func updateButtons() {
         let row = selectedRow, many = selectedRows.count > 1, movable = selectedRows.filter(Self.movable)
