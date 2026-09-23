@@ -1,4 +1,4 @@
-<p align="center"><img src="assets/avakasha-overview.png" alt="Avakasha overview: drives, this session and where to start (actual app, generated demo)" width="100%"></p>
+<p align="center"><img src="assets/avakasha-demo.gif" alt="Avakasha in 20 seconds: overview, storage map, keyboard review, inline video and Hebrew layout (actual app, generated demo files)" width="100%"></p>
 
 <p align="center">
   <a href="https://github.com/danielsimisi-coder/avakasha/actions/workflows/ci.yml"><img alt="macOS checks" src="https://github.com/danielsimisi-coder/avakasha/actions/workflows/ci.yml/badge.svg"></a>
@@ -26,6 +26,8 @@ Avakasha makes the review practical. Choose a folder or drive, sort by size, and
 In one sentence: Avakasha is a Mac app that helps you free up space by showing what is actually filling your computer, from WhatsApp media to Downloads, Movies and external drives, so you can see it and decide what stays.
 
 **Overview.** The app opens on an overview: each local disk with used, total and free space and a share bar, what this session has moved to Trash so far, and three ways to start (map the home folder, map a folder or drive, open Trash in Finder). The numbers come from volume attributes only; nothing inside a volume is listed until you choose a location. Free space is what you can still write, so Trash does not count as free until you empty it. The sidebar highlights the view you are in: Overview, Storage map, Free up space, Older files, Installers or the loaded location.
+
+![Overview: drives, this session and where to start](assets/avakasha-overview.png)
 
 ## Where is the space?
 
