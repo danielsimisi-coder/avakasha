@@ -1,6 +1,11 @@
 import Cocoa
 import AvakashaCore
 
+/// The space guard as the overview shows it: the floor, today's free space, the forecast and what grew.
+struct GuardState: Equatable {
+    let floor: Int64; let volumeName: String; let free: Int64; let forecastDays: Double?; let historyDays: Int; let growthLine: String?; let attentionTarget: Int64?
+}
+
 /// One step on the overview's "What can go" card: a Free up space row, its size and verdict.
 struct OverviewStep: Equatable { let id: String; let title: String; let bytes: Int64; let safety: CleanupSafety }
 
@@ -46,6 +51,15 @@ final class OverviewPanel: NSView {
     /// Per drive, the part of System Data no file move changes: purgeable space and local snapshots (names and dates only).
     private(set) var systemDataLines: [String] = []
     let openTrashButton = NSButton()
+    /// "Keep free space": a floor, what the watch sees, and a plan when the floor is near.
+    private let guardHeadline = NSTextField(wrappingLabelWithString: "")
+    private let guardDetail = NSTextField(wrappingLabelWithString: "")
+    let floorPopup = NSPopUpButton()
+    let guardPlanButton = NSButton()
+    var onFloor: ((Int64) -> Void)?
+    var onGuardPlan: ((Int64) -> Void)?
+    private(set) var guardState: GuardState?
+    static let floorChoices: [Int64] = [0, 20_000_000_000, 40_000_000_000, 60_000_000_000, 100_000_000_000]
     private let sessionRow = NSStackView()
     private let sessionLabel = NSTextField(wrappingLabelWithString: "")
     /// One line on screen, in the label colour because it is a safety statement; the full explanation opens from the ⓘ.
@@ -85,6 +99,19 @@ final class OverviewPanel: NSView {
         let actions = NSStackView(views: [continueButton, freeUpButton, mapHomeButton, mapDriveButton]); actions.spacing = 8
         let caveatRow = NSStackView(views: [caveat, caveatInfo]); caveatRow.spacing = 4; caveatRow.alignment = .centerY
         column.orientation = .vertical; column.alignment = .leading; column.spacing = 8
+        guardHeadline.font = Type.bodyMedium; guardDetail.font = Type.subhead; guardDetail.textColor = .secondaryLabelColor
+        for value in Self.floorChoices { floorPopup.addItem(withTitle: value == 0 ? L("Off", "כבוי") : L("Keep at least ", "לשמור לפחות ") + bytes(value)); floorPopup.lastItem?.representedObject = NSNumber(value: value) }
+        floorPopup.controlSize = .small; floorPopup.font = Type.caption; floorPopup.target = self; floorPopup.action = #selector(floorChosen); floorPopup.setAccessibilityLabel(L("Free space to keep", "מקום פנוי לשמור"))
+        guardPlanButton.bezelStyle = .rounded; guardPlanButton.controlSize = .small; guardPlanButton.font = Type.caption; guardPlanButton.target = self; guardPlanButton.action = #selector(guardPlan)
+        guardPlanButton.image = NSImage(systemSymbolName: "checklist", accessibilityDescription: nil); guardPlanButton.imagePosition = .imageLeading
+        let guardControls = NSStackView(views: [floorPopup, guardPlanButton]); guardControls.spacing = 8
+        let guardInner = NSStackView(views: [guardHeadline, guardDetail, guardControls]); guardInner.orientation = .vertical; guardInner.alignment = .leading; guardInner.spacing = 6
+        let guardCard = NSView(); guardCard.wantsLayer = true; guardCard.layer?.cornerRadius = 10; guardCard.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
+        guardInner.translatesAutoresizingMaskIntoConstraints = false; guardCard.addSubview(guardInner)
+        NSLayoutConstraint.activate([guardInner.leadingAnchor.constraint(equalTo: guardCard.leadingAnchor, constant: 16), guardInner.trailingAnchor.constraint(equalTo: guardCard.trailingAnchor, constant: -16),
+                                     guardInner.topAnchor.constraint(equalTo: guardCard.topAnchor, constant: 12), guardInner.bottomAnchor.constraint(equalTo: guardCard.bottomAnchor, constant: -12),
+                                     guardHeadline.widthAnchor.constraint(equalTo: guardInner.widthAnchor), guardDetail.widthAnchor.constraint(equalTo: guardInner.widthAnchor)])
+        guardCard.setAccessibilityElement(true); guardCard.setAccessibilityRole(.group); guardCard.setAccessibilityLabel(L("Keep free space", "שמירת מקום פנוי"))
         // A card like the drive cards: headline, the steps, the button.
         let stepsInner = NSStackView(views: [stepsHeadline, stepsStack, stepsButton]); stepsInner.orientation = .vertical; stepsInner.alignment = .leading; stepsInner.spacing = 8
         let stepsCard = NSView(); stepsCard.wantsLayer = true; stepsCard.layer?.cornerRadius = 10; stepsCard.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
@@ -94,18 +121,47 @@ final class OverviewPanel: NSView {
                                      stepsHeadline.widthAnchor.constraint(equalTo: stepsInner.widthAnchor), stepsStack.widthAnchor.constraint(equalTo: stepsInner.widthAnchor)])
         stepsCard.setAccessibilityElement(true); stepsCard.setAccessibilityRole(.group); stepsCard.setAccessibilityLabel(L("What can go", "מה אפשר לפנות"))
         [sessionLabel, openTrashButton].forEach(sessionRow.addArrangedSubview); sessionRow.orientation = .vertical; sessionRow.alignment = .leading; sessionRow.spacing = 6
-        for v in [section("DRIVES", "כוננים"), volumesStack, section("WHAT CAN GO", "מה אפשר לפנות"), stepsCard, sectionSession, sessionRow, section("START", "התחלה"), actions, caveatRow] { column.addArrangedSubview(v) }
-        stepsCard.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
-        column.setCustomSpacing(24, after: volumesStack); column.setCustomSpacing(24, after: stepsCard); column.setCustomSpacing(24, after: sessionRow); column.setCustomSpacing(24, after: actions)
-        column.translatesAutoresizingMaskIntoConstraints = false; addSubview(column)
-        NSLayoutConstraint.activate([column.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 24), column.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -24),
-                                     column.topAnchor.constraint(equalTo: topAnchor, constant: 8), column.widthAnchor.constraint(lessThanOrEqualToConstant: 720),
+        for v in [section("DRIVES", "כוננים"), volumesStack, section("KEEP FREE SPACE", "שמירת מקום פנוי"), guardCard, section("WHAT CAN GO", "מה אפשר לפנות"), stepsCard, sectionSession, sessionRow, section("START", "התחלה"), actions, caveatRow] { column.addArrangedSubview(v) }
+        stepsCard.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true; guardCard.widthAnchor.constraint(equalTo: column.widthAnchor).isActive = true
+        column.setCustomSpacing(24, after: volumesStack); column.setCustomSpacing(24, after: guardCard); column.setCustomSpacing(24, after: stepsCard); column.setCustomSpacing(24, after: sessionRow); column.setCustomSpacing(24, after: actions)
+        // The sections scroll when the window is short or there are several drives; the column keeps its reading width.
+        let scroll = NSScrollView(); scroll.hasVerticalScroller = true; scroll.autohidesScrollers = true; scroll.drawsBackground = false
+        let document = FlippedView(); scroll.documentView = document
+        scroll.translatesAutoresizingMaskIntoConstraints = false; addSubview(scroll)
+        document.translatesAutoresizingMaskIntoConstraints = false
+        column.translatesAutoresizingMaskIntoConstraints = false; document.addSubview(column)
+        NSLayoutConstraint.activate([scroll.leadingAnchor.constraint(equalTo: leadingAnchor), scroll.trailingAnchor.constraint(equalTo: trailingAnchor), scroll.topAnchor.constraint(equalTo: topAnchor), scroll.bottomAnchor.constraint(equalTo: bottomAnchor),
+                                     document.leadingAnchor.constraint(equalTo: scroll.contentView.leadingAnchor), document.topAnchor.constraint(equalTo: scroll.contentView.topAnchor), document.widthAnchor.constraint(equalTo: scroll.contentView.widthAnchor),
+                                     column.leadingAnchor.constraint(equalTo: document.leadingAnchor, constant: 24), column.trailingAnchor.constraint(lessThanOrEqualTo: document.trailingAnchor, constant: -24),
+                                     column.topAnchor.constraint(equalTo: document.topAnchor, constant: 8), column.bottomAnchor.constraint(equalTo: document.bottomAnchor, constant: -16), column.widthAnchor.constraint(lessThanOrEqualToConstant: 720),
                                      volumesStack.widthAnchor.constraint(equalTo: column.widthAnchor), sessionLabel.widthAnchor.constraint(equalTo: column.widthAnchor), caveatRow.widthAnchor.constraint(equalTo: column.widthAnchor)])
-        column.widthAnchor.constraint(equalTo: widthAnchor, constant: -48).withPriority(.defaultHigh).isActive = true
+        column.widthAnchor.constraint(equalTo: document.widthAnchor, constant: -48).withPriority(.defaultHigh).isActive = true
         setAccessibilityLabel(L("Overview", "סקירה כללית"))
         update(sessionMoved: 0)
         setSteps(measured: false, canGo: 0, other: 0, steps: [])
+        setGuard(nil)
     }
+    /// nil: the guard is off and the card explains it. Otherwise the floor, the forecast, what grew and, near the floor, a plan button.
+    func setGuard(_ state: GuardState?) {
+        guardState = state
+        floorPopup.selectItem(at: Self.floorChoices.firstIndex(of: state?.floor ?? 0) ?? 0)
+        guard let s = state else {
+            guardHeadline.stringValue = L("Choose how much free space to keep.", "בוחרים כמה מקום פנוי לשמור.")
+            guardDetail.stringValue = L("Avakasha then watches this Mac while it is open: what grows, when the floor will be reached, and a plan ready before it is. Off by default; nothing moves without your confirmation.", "מכאן Avakasha עוקבת אחרי ה־Mac כל עוד היא פתוחה: מה גדל, מתי יגיעו לרף, ותוכנית מוכנה לפני שזה קורה. כבוי כברירת מחדל; שום דבר לא זז בלי אישור שלך.")
+            guardPlanButton.isHidden = true; return
+        }
+        guardHeadline.stringValue = L("Keeping at least ", "שומרים לפחות ") + bytes(s.floor) + L(" free on ", " פנויים ב־") + s.volumeName + " · " + bytes(s.free) + L(" free now", " פנויים עכשיו")
+        var lines: [String] = []
+        if s.free < s.floor { lines.append(L("Below the floor now.", "מתחת לרף עכשיו.")) }
+        else if let days = s.forecastDays { lines.append(days < 1.5 ? L("At this pace, the floor is reached within a day or two.", "בקצב הזה מגיעים לרף תוך יום־יומיים.") : L("At this pace, the floor is reached in about \(Int(days.rounded())) days.", "בקצב הזה מגיעים לרף בעוד כ־\(Int(days.rounded())) ימים.")) }
+        else { lines.append(s.historyDays < 3 ? L("Learning the pace: a forecast needs a few days of history.", "לומדים את הקצב: תחזית צריכה היסטוריה של כמה ימים.") : L("Free space is steady or growing.", "המקום הפנוי יציב או גדל.")) }
+        if let growth = s.growthLine { lines.append(growth) }
+        guardDetail.stringValue = lines.joined(separator: "\n")
+        if let target = s.attentionTarget { guardPlanButton.title = L("Plan to free ", "תוכנית לפינוי ") + bytes(target) + "…"; guardPlanButton.isHidden = false } else { guardPlanButton.isHidden = true }
+        guardPlanButton.setAccessibilityLabel(guardPlanButton.title)
+    }
+    @objc private func floorChosen() { onFloor?((floorPopup.selectedItem?.representedObject as? NSNumber)?.int64Value ?? 0) }
+    @objc private func guardPlan() { if let target = guardState?.attentionTarget { onGuardPlan?(target) } }
     required init?(coder: NSCoder) { nil }
 
     /// Fills "What can go" from what Free up space measured. Before anything is measured it offers to check, and measures nothing itself.
@@ -198,6 +254,9 @@ final class OverviewPanel: NSView {
     @objc private func resume() { onContinue?() }
     @objc private func openTrash() { onOpenTrash?() }
 }
+
+/// Top-left origin, so a short page starts at the top of the scroll view.
+private final class FlippedView: NSView { override var isFlipped: Bool { true } }
 
 private extension NSLayoutConstraint {
     func withPriority(_ p: NSLayoutConstraint.Priority) -> NSLayoutConstraint { priority = p; return self }

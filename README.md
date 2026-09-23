@@ -27,9 +27,11 @@ In one sentence: Avakasha is a Mac app that helps you free up space by showing w
 
 **Overview.** The app opens on an overview: each local disk with used, total and free space and a share bar, **What can go**, what this session has moved to Trash so far, and ways to start (Free up space, map the home folder, map a folder or drive). What can go shows what Free up space measured: how much can go to Trash now, how much needs an app, Terminal or a review, and the five most worthwhile steps, ranked by size weighted by how safe each step is; click one to jump to it. Before anything is measured it offers **Check what can go** and measures nothing by itself. The Trash section shows what is in Trash when Free up space could measure it, with **Open Trash**. Each drive card also names the part of System Data you cannot move to Trash: purgeable space macOS frees by itself, and local snapshots (Time Machine's counted separately, with the newest date and a **Time Machine Settings…** button). Snapshot sizes need administrator rights, so only counts and dates are shown.
 
+**Keep free space.** Choose a floor on the overview (or in Avakasha › Keep Free Space) and Avakasha watches this Mac while it is open: what grew in the last week, when the floor will be reached at the current pace, and a plan ready before it is. When the disk is below the floor or will be within a week, one notification (at most every two days) opens Free up space with the plan selected and the usual confirmation; nothing moves before you confirm. In Free up space, **Need … GB · Plan** does the same on demand: the fewest rows that reach the target, only data the owning apps rebuild, with the largest rows to review named when that is not enough. The history behind it stays on this Mac (one sample a day for up to 180 days: free space and sizes, never contents or the folders Find more found) and is deleted with **Forget Size History** or when the floor and the weekly check are both off. With **Show in Menu Bar** and **Open at Login**, the watch keeps running after you close the window.
+
 **Menu bar and weekly check.** In the Avakasha menu, **Show in Menu Bar** puts the startup disk's free space in the menu bar, with a menu for every drive, what can go to Trash now, Check What Can Go… and Open Avakasha; closing the window then keeps Avakasha running. **Weekly Check & Low-Space Alerts** (off by default) measures the rebuildable known locations once a week while Avakasha is open and sends a local notification when at least 2 GB can go to Trash and it grew since the last check, plus at most one alert a day when the startup disk runs low (under 15 GB free, or under 10% on a smaller disk). It never moves anything. **Open at Login** keeps it running after a restart. The numbers come from volume attributes only; nothing inside a volume is listed until you choose a location. Free space is what you can still write, so Trash does not count as free until you empty it. The sidebar highlights the view you are in: Overview, Storage map, Free up space, Older files, Installers or the loaded location.
 
-![Overview: drives, what can go and where to start, generated demo data](assets/avakasha-overview.png)
+![Overview: drives, keep free space, what can go and where to start; generated demo data](assets/avakasha-overview.png)
 
 ## Where is the space?
 
@@ -193,7 +195,7 @@ docs/                    Privacy, safety, release and contributor guidance
 
 ## Status and contribution
 
-This is beta 14. Code compilation and automated tests are not substitutes for testing on every macOS version. The Intel slice is cross-built; real Intel-machine verification and clean-Mac Gatekeeper verification are release checklist items, not implied claims.
+This is beta 15. Code compilation and automated tests are not substitutes for testing on every macOS version. The Intel slice is cross-built; real Intel-machine verification and clean-Mac Gatekeeper verification are release checklist items, not implied claims.
 
 The interface is English by default. **Avakasha › Language › עברית** switches the whole app to Hebrew with right-to-left layout on the next launch (the choice is stored for this app only). Contributions to accessibility, localisation and synthetic-fixture coverage are welcome. See [CONTRIBUTING](CONTRIBUTING.md), [SECURITY](SECURITY.md), and [CHANGELOG](CHANGELOG.md).
 

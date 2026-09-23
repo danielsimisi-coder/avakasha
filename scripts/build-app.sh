@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 cd "$(dirname "$0")/.."
-version="${VERSION:-0.1.0-beta.14}"
+version="${VERSION:-0.1.0-beta.15}"
 build_root="${BUILD_ROOT:-.build/distribution}"
 dist_dir="${DIST_DIR:-dist}"
 mkdir -p "$build_root" "$dist_dir"

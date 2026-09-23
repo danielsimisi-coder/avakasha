@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-beta.15
+
+- **Keep free space** (overview card, or Avakasha › Keep Free Space): choose a floor (20, 40, 60 or 100 GB). While Avakasha is open, it keeps a small local history of free space and of the sizes it measures, shows what grew in the last week ("Since 16 Sep: Xcode DerivedData +7.2 GB · Downloads +1.4 GB · free −12.6 GB"), forecasts when the floor will be reached at the current pace, and offers **Plan to free …** when the floor is near. Off by default.
+- When the startup disk is below the floor, or the forecast reaches it within a week, Avakasha measures the rebuildable known locations, builds a plan and sends one notification (at most every two days). Clicking it opens Free up space with the plan selected and the usual confirmation that lists every folder, with Cancel as the default. Nothing moves before you confirm, and one ⌘Z brings it all back.
+- **Need … GB · Plan** in Free up space: type how much room you need and Avakasha selects the fewest rows that get you there, using only data the owning apps rebuild; if that is not enough, it names the largest rows to review for the rest.
+- The size history holds one sample a day for up to 180 days: free space, catalogue locations by id, and the sizes of the home folder's own folders (and those directly in Library) when you map the home folder. Folders found by Find more are never recorded. **Forget Size History** deletes it, and turning off both the floor and the weekly check deletes it too.
+- The overview scrolls when the window is short.
+
 ## 0.1.0-beta.14
 
 - **System Data, explained further.** Each drive card on the overview names the part of System Data no file move changes: purgeable space macOS frees by itself (from volume attributes) and local snapshots on internal drives, with Time Machine's local ones counted separately and the newest date (listed with `fs_snapshot_list`, the call behind `tmutil listlocalsnapshots`: names and dates only, no administrator rights, nothing changed). An info button explains both, and a Time Machine Settings button appears when Time Machine keeps local snapshots. The Free up space caveat line shows the same numbers for the home folder's drive. Snapshot sizes need administrator rights, so only counts are shown.

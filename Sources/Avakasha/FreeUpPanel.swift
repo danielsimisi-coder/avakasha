@@ -180,6 +180,9 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
     let selectRebuildableButton = NSButton(), smallButton = NSButton()
     /// Searches the whole home folder for more: regenerable folders by name, data of removed apps, folders untouched for months.
     let findButton = NSButton()
+    /// "Need [30] GB · Plan": the safest set of rebuildable rows that reaches a target, selected and explained, ready for one confirmation.
+    let planField = NSTextField(), planButton = NSButton()
+    let planLabel = NSTextField(wrappingLabelWithString: "")
     /// Rows the search found. They stay until the screen reloads and their folder is gone.
     private(set) var foundLocations: [KnownLocation] = []
     private var foundHome: String?
@@ -233,8 +236,16 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         copyButton.isHidden = true // folded into the row action ("Copy command & open Terminal")
         findButton.image = symbol("sparkle.magnifyingglass", 12); findButton.imagePosition = .imageLeading
         findButton.toolTip = L("Looks through your whole home folder for build and cache folders, data of apps that are no longer installed, and large folders untouched for months. Reads names, sizes and dates only.", "עובר על כל תיקיית הבית ומחפש תיקיות בנייה ומטמון, נתונים של אפליקציות שכבר לא מותקנות ותיקיות גדולות שלא השתנו חודשים. קורא רק שמות, גדלים ותאריכים.")
-        let summaryButtons = NSStackView(views: [findButton, selectRebuildableButton, smallButton]); summaryButtons.spacing = 8
-        let summaryCard = NSStackView(views: [summaryLabel, summaryButtons]); summaryCard.orientation = .vertical; summaryCard.alignment = .leading; summaryCard.spacing = 8
+        planField.placeholderString = L("GB", "GB"); planField.controlSize = .small; planField.font = Type.caption; planField.alignment = .right
+        planField.widthAnchor.constraint(equalToConstant: 48).isActive = true; planField.target = self; planField.action = #selector(planTapped)
+        planField.setAccessibilityLabel(L("Gigabytes needed", "כמה גיגה־בייט צריך"))
+        planButton.title = L("Plan", "תוכנית"); planButton.bezelStyle = .rounded; planButton.controlSize = .small; planButton.font = Type.caption; planButton.target = self; planButton.action = #selector(planTapped)
+        planButton.toolTip = L("Selects the safest rows that together free this much: only data the owning apps rebuild, largest first. Nothing moves until you confirm.", "בוחר את השורות הבטוחות ביותר שיחד מפנות את הכמות הזו: רק נתונים שהאפליקציות בונות מחדש, מהגדול לקטן. שום דבר לא זז בלי אישור.")
+        let needLabel = NSTextField(labelWithString: L("Need", "צריך")); needLabel.font = Type.caption; needLabel.textColor = .secondaryLabelColor
+        let planGroup = NSStackView(views: [needLabel, planField, planButton]); planGroup.spacing = 4; planGroup.alignment = .centerY
+        planLabel.font = Type.subhead; planLabel.textColor = .labelColor; planLabel.isHidden = true
+        let summaryButtons = NSStackView(views: [findButton, selectRebuildableButton, smallButton, planGroup]); summaryButtons.spacing = 8
+        let summaryCard = NSStackView(views: [summaryLabel, planLabel, summaryButtons]); summaryCard.orientation = .vertical; summaryCard.alignment = .leading; summaryCard.spacing = 8
         summaryCard.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14); summaryCard.wantsLayer = true; summaryCard.layer?.cornerRadius = 10; summaryCard.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
         table.rowHeight = 30; table.intercellSpacing = NSSize(width: 12, height: 4); table.usesAlternatingRowBackgroundColors = false; table.style = .inset
         table.columnAutoresizingStyle = .uniformColumnAutoresizingStyle; table.allowsMultipleSelection = true // ⌘/Shift-click several green rows, move them in one step
@@ -250,7 +261,7 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         column.translatesAutoresizingMaskIntoConstraints = false; addSubview(column)
         NSLayoutConstraint.activate([column.leadingAnchor.constraint(equalTo: leadingAnchor), column.trailingAnchor.constraint(equalTo: trailingAnchor),
                                      column.topAnchor.constraint(equalTo: topAnchor), column.bottomAnchor.constraint(equalTo: bottomAnchor),
-                                     summaryCard.widthAnchor.constraint(equalTo: column.widthAnchor), summaryLabel.widthAnchor.constraint(equalTo: summaryCard.widthAnchor, constant: -28),
+                                     summaryCard.widthAnchor.constraint(equalTo: column.widthAnchor), summaryLabel.widthAnchor.constraint(equalTo: summaryCard.widthAnchor, constant: -28), planLabel.widthAnchor.constraint(equalTo: summaryCard.widthAnchor, constant: -28),
                                      toolbar.widthAnchor.constraint(equalTo: column.widthAnchor), scroll.widthAnchor.constraint(equalTo: column.widthAnchor)])
         table.delegate = self; table.dataSource = self
         table.onTrash = { [weak self] in self?.trashSelected() }
@@ -332,6 +343,7 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
     func reload(keepMeasurements: Bool = false) {
         let old = Dictionary(rows.map { ($0.location.id, $0) }, uniquingKeysWith: { a, _ in a })
         if foundHome != home.standardizedFileURL.path { foundLocations = [] }
+        planLabel.isHidden = true
         foundLocations = foundLocations.filter { FileManager.default.fileExists(atPath: $0.url(home: home).path) }
         let locations = KnownLocations.present(in: home) + KnownLocations.cacheFolders(in: home) + foundLocations
         updateSystemDataCaveat()
@@ -370,6 +382,29 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         table.selectRowIndexes(indexes, byExtendingSelection: false); window?.makeFirstResponder(table)
     }
     @objc func findMore() { onFind?() }
+    @objc func planTapped() {
+        let text = planField.stringValue.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespaces)
+        guard let gb = Double(text), gb > 0, gb < 100_000 else { NSSound.beep(); window?.makeFirstResponder(planField); return }
+        showPlan(target: Int64(gb * 1_000_000_000))
+    }
+    /// Builds the plan from what is measured, selects its rows and says what it covers; the rest is only suggested for review.
+    @discardableResult func showPlan(target: Int64) -> CleanupPlan {
+        let candidates = rows.filter { r in !r.moved && (r.measurement.map { $0.error == nil && $0.bytes > 0 } ?? false)
+            && !rows.contains { o in o.location.id != r.location.id && o.location.relativePath.hasPrefix(r.location.relativePath + "/") } }
+        let plan = CleanupPlan.make(target: target, items: candidates.map { PlanItem(id: $0.location.id, bytes: $0.measurement!.bytes, movable: Self.movable($0)) })
+        let ids = Set(plan.steps.map(\.id))
+        if plan.steps.contains(where: { id in !visible.contains { $0.location.id == id.id } }) { setShowSmall(true) }
+        table.selectRowIndexes(IndexSet(visible.indices.filter { ids.contains(visible[$0].location.id) }), byExtendingSelection: false)
+        func title(_ id: String) -> String { rows.first { $0.location.id == id }.map { LocationTexts.text(for: $0.location).title } ?? id }
+        var text: String
+        if plan.steps.isEmpty { text = L("Nothing measured here can go to Trash yet.", "עדיין אין כאן דבר מדוד שאפשר להעביר לפח.") }
+        else if plan.shortfall == 0 { text = L("Plan for ", "תוכנית ל־") + bytes(target) + ": " + "\(plan.steps.count) " + L("rows, ", "שורות, ") + bytes(plan.total) + L(", all rebuilt by their apps. They are selected: press Move to Trash… to review and confirm.", ", הכול נבנה מחדש על ידי האפליקציות. הן מסומנות: לוחצים ״העבר לפח…״ כדי לעבור עליהן ולאשר.") }
+        else { text = L("Rebuildable data covers ", "נתונים שנבנים מחדש מכסים ") + bytes(plan.total) + L(" of ", " מתוך ") + bytes(target) + L(" and is selected.", " והם מסומנים.") }
+        if !plan.reviewSuggestions.isEmpty { text += " " + L("For the rest, review: ", "לשאר, כדאי לסקור: ") + plan.reviewSuggestions.map { title($0.id) + " (" + bytes($0.bytes) + ")" }.joined(separator: ", ") + "." }
+        planLabel.stringValue = text; planLabel.isHidden = false; planField.stringValue = String(format: "%g", (Double(target) / 1_000_000_000 * 10).rounded() / 10)
+        updateDetail(); updateButtons(); onSelectionChange?(); window?.makeFirstResponder(table)
+        return plan
+    }
     var caveatText: String { caveat.stringValue }
     /// The caveat line with this drive's numbers: purgeable space and local snapshots (names and dates only).
     func updateSystemDataCaveat() {
@@ -418,7 +453,7 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         guard let index = rows.firstIndex(where: { $0.location.id == location.id }) else { return }
         rows[index].moved = true; sortRows(); updateDetail(); updateButtons(); onSelectionChange?()
     }
-    func setEnabled(_ enabled: Bool) { table.isEnabled = enabled; if enabled { updateButtons(); updateSummary() } else { [measureButton, trashButton, revealButton, copyButton, actionButton, selectRebuildableButton, findButton].forEach { $0.isEnabled = false } } }
+    func setEnabled(_ enabled: Bool) { table.isEnabled = enabled; planField.isEnabled = enabled; if enabled { updateButtons(); updateSummary() } else { [measureButton, trashButton, revealButton, copyButton, actionButton, selectRebuildableButton, findButton, planButton].forEach { $0.isEnabled = false } } }
     /// A folder came back from Trash: it is present again and needs measuring again.
     func restored(_ url: URL) {
         guard let index = rows.firstIndex(where: { $0.location.url(home: home).standardizedFileURL.path == url.standardizedFileURL.path }) else { return }
@@ -486,7 +521,7 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private func updateButtons() {
         let row = selectedRow, many = selectedRows.count > 1, movable = selectedRows.filter(Self.movable)
         measureButton.isEnabled = !unmeasured.isEmpty
-        findButton.isEnabled = true
+        findButton.isEnabled = true; planButton.isEnabled = true
         revealButton.isEnabled = !many && row != nil && row?.moved == false; revealButton.isHidden = many
         trashButton.isHidden = movable.isEmpty && row?.location.safety != .rebuildable
         trashButton.isEnabled = !movable.isEmpty

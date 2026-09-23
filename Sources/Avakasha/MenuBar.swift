@@ -8,6 +8,8 @@ final class MenuBarController: NSObject, NSMenuDelegate {
     private var timer: Timer?
     /// What can go, as the app last knew it: "Can go to Trash now: 7.9 GB", or the weekly check's total with its date.
     var canGoLine: () -> String? = { nil }
+    /// "Floor 40 GB · reached in about 23 days", when a floor is set.
+    var guardLine: () -> String? = { nil }
     var weeklyOn: () -> Bool = { false }
     var loginOn: () -> Bool = { false }
     var onOpen: (() -> Void)?
@@ -39,6 +41,7 @@ final class MenuBarController: NSObject, NSMenuDelegate {
         for volume in Volumes.mounted() {
             let line = NSMenuItem(title: volume.name + " · " + bytes(volume.available) + L(" free of ", " פנויים מתוך ") + bytes(volume.total), action: nil, keyEquivalent: ""); line.isEnabled = false; menu.addItem(line)
         }
+        if let text = guardLine() { let line = NSMenuItem(title: text, action: nil, keyEquivalent: ""); line.isEnabled = false; menu.addItem(line) }
         menu.addItem(.separator())
         if let text = canGoLine() { let line = NSMenuItem(title: text, action: nil, keyEquivalent: ""); line.isEnabled = false; menu.addItem(line) }
         add(menu, L("Check What Can Go…", "בדוק מה אפשר לפנות…"), #selector(check))

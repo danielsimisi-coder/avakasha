@@ -167,6 +167,17 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     /// Test hooks: the smoke test captures notifications instead of posting them, and lowers the weekly threshold for its tiny fixtures.
     var notifyOverride: ((String,String)->Void)?
     var weeklyMinimum: Int64 = 2_000_000_000
+    /// Space guard: the floor, the local size history, and a plan waiting for Free up space to finish measuring.
+    var floorMenuItems: [NSMenuItem] = []
+    var historyURLOverride: URL?
+    var spaceHistoryCache: SpaceHistory?
+    var pendingPlanTarget: Int64?
+    var lastNotificationInfo: [String:Any] = [:]
+    var floorBytes: Int64 { (preferences.object(forKey:"floorBytes") as? NSNumber)?.int64Value ?? 0 }
+    /// The history is kept only while the guard or the weekly check is on, never in the demo.
+    var historyEnabled: Bool { !demoMode && (preferences.bool(forKey:"weeklyCheck") || floorBytes > 0) }
+    /// In the smoke test without an override this points into the temporary folder, never at the real history.
+    var historyURL: URL { historyURLOverride ?? (smokeMode ? FileManager.default.temporaryDirectory.appendingPathComponent("avakasha-smoke-history.json") : FileManager.default.urls(for:.applicationSupportDirectory,in:.userDomainMask)[0].appendingPathComponent("Avakasha/space-history.json")) }
     /// Notifications need a real app bundle; `swift run` has none.
     var canNotify: Bool { Bundle.main.bundleURL.pathExtension == "app" && Bundle.main.bundleIdentifier != nil }
     var mapMode = false
@@ -345,6 +356,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         overviewPanel.onMapHome={[weak self] in if let h=self?.home { self?.startMap(h,reuseRecent:true) }}
         overviewPanel.onStep={[weak self] id in guard let self=self, !self.busy else { return };self.setFreeUp(true);self.freeUpPanel.select(id:id)}
         overviewPanel.onOpenTrash={[weak self] in if self?.smokeMode == false { self?.openTrash() }}
+        overviewPanel.onFloor={[weak self] value in self?.setFloor(value)}
+        overviewPanel.onGuardPlan={[weak self] target in self?.openPlan(target)}
         overviewPanel.onTimeMachine={[weak self] in if self?.smokeMode == false, let url=URL(string:"x-apple.systempreferences:com.apple.Time-Machine-Settings.extension") { NSWorkspace.shared.open(url) }}
         overviewPanel.onMapDrive={[weak self] in self?.chooseMapFolder()}
         overviewPanel.onFreeUp={[weak self] in self?.showFreeUp()}
@@ -475,6 +488,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             if ["--demo-freeup","--demo-find","--demo-steps"].contains(where:ProcessInfo.processInfo.arguments.contains) { showFreeUp() }
             if ProcessInfo.processInfo.arguments.contains("--demo-find") || ProcessInfo.processInfo.arguments.contains("--demo-steps") { DispatchQueue.main.asyncAfter(deadline:.now()+1.5){ [weak self] in self?.findMore() } }
             if ProcessInfo.processInfo.arguments.contains("--demo-steps") { DispatchQueue.main.asyncAfter(deadline:.now()+3.5){ [weak self] in self?.showOverview() } }
+            // Demo only: the guard card with made-up numbers; nothing is recorded or stored.
+            if ProcessInfo.processInfo.arguments.contains("--demo-guard") { DispatchQueue.main.asyncAfter(deadline:.now()+4){ [weak self] in
+                self?.overviewPanel.setGuard(GuardState(floor:40_000_000_000,volumeName:"Macintosh HD",free:52_300_000_000,forecastDays:6,historyDays:21,
+                    growthLine:L("Since 16 Sep: Xcode DerivedData +7.2 GB · WhatsApp media +3.1 GB · Downloads +1.4 GB · free −12.6 GB","מאז 16 בספט׳: Xcode DerivedData ‎+7.2 GB · מדיה של WhatsApp ‎+3.1 GB · Downloads ‎+1.4 GB · פנוי ‎−12.6 GB"),attentionTarget:5_000_000_000)) } }
             if ProcessInfo.processInfo.arguments.contains("--demo-homemap") { DispatchQueue.main.asyncAfter(deadline:.now()+5){ [weak self] in guard let self=self else { return };self.startMap(self.home,reuseRecent:true) } }
             mapPanel.showsPaths=false;pathLabel.isHidden=true
             if overviewMode && !ProcessInfo.processInfo.arguments.contains("--demo-overview") { setMapMode(false) } // the demo shows the file review unless asked for the overview
@@ -553,7 +570,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             menu.insertItem(entry,at:4+index)
             switch index { case 0: menuBarMenuItem=entry; case 1: weeklyMenuItem=entry; default: loginMenuItem=entry }
         }
-        menu.insertItem(.separator(),at:7)
+        let keep=NSMenuItem(title:L("Keep Free Space","שמירת מקום פנוי"),action:nil,keyEquivalent:"");let keepMenu=NSMenu(title:keep.title)
+        for value in OverviewPanel.floorChoices {
+            let entry=NSMenuItem(title:value == 0 ? L("Off","כבוי") : L("At Least ","לפחות ")+bytes(value),action:#selector(chooseFloor(_:)),keyEquivalent:"");entry.target=self;entry.representedObject=NSNumber(value:value)
+            entry.state = floorBytes == value ? .on : .off;keepMenu.addItem(entry);floorMenuItems.append(entry)
+        }
+        keepMenu.addItem(.separator());let forget=NSMenuItem(title:L("Forget Size History","מחק את היסטוריית הגדלים"),action:#selector(forgetHistoryCommand),keyEquivalent:"");forget.target=self;keepMenu.addItem(forget)
+        keep.submenu=keepMenu;menu.insertItem(keep,at:7)
+        menu.insertItem(.separator(),at:8)
         NSApp.mainMenu=main
     }
     /// True while the file list is the view on screen (not the overview, the map or Free up space).
@@ -616,14 +640,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         case #selector(findMoreCommand): return !busy
         case #selector(showInFinderCommand): return !busy && (mapMode ? mapPanel.current != nil : (freeUpMode ? freeUpPanel.revealButton.isEnabled : focusedFile != nil))
         case #selector(moveToTrashCommand): return !busy && !demoMode && (mapMode ? mapPanel.trashableFolder != nil : (freeUpMode ? freeUpPanel.trashButton.isEnabled : (root != nil && !selectedFiles.isEmpty)))
-        case #selector(toggleMenuBar(_:)),#selector(toggleWeeklyCheck(_:)),#selector(toggleOpenAtLogin(_:)): return !demoMode
+        case #selector(toggleMenuBar(_:)),#selector(toggleWeeklyCheck(_:)),#selector(toggleOpenAtLogin(_:)),#selector(chooseFloor(_:)): return !demoMode
+        case #selector(forgetHistoryCommand): return !demoMode && FileManager.default.fileExists(atPath:historyURL.path)
         default: return true
         }
     }
     /// The standard About panel shows the bundle icon at its proper size; the version lives here, not in the title bar.
     @objc func aboutApp() {
         let credits=NSAttributedString(string:"© 2026 Daniel Siman Tov · daniel.simisi@gmail.com\n"+L("Local. Private. Yours. Nothing is deleted; files go to Trash and ⌘Z brings them back. MIT license. Not affiliated with WhatsApp or Meta.","מקומי. פרטי. שלך. שום דבר לא נמחק; קבצים עוברים לפח ו־⌘Z מחזיר אותם. רישיון MIT. ללא שיוך ל־WhatsApp או Meta."),attributes:[.font:Type.caption,.foregroundColor:NSColor.labelColor])
-        NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"Avakasha",.applicationVersion:"0.1.0 beta 14",.version:"",.credits:credits])
+        NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"Avakasha",.applicationVersion:"0.1.0 beta 15",.version:"",.credits:credits])
     }
     func show(_ title: String, _ detail: String) {
         if smokeMode { print("Alert suppressed in smoke mode: \(title) — \(detail)"); return }
@@ -744,6 +769,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
                 let stopped = jobToken.isCancelled ? " · "+L("Stopped · partial","נעצר · חלקי") : ""
                 self.status.stringValue="\(finished) "+L("measured","נמדדו")+" · "+bytes(self.freeUpPanel.measuredTotal)+" · "+L("of which ","מתוכם ")+bytes(self.freeUpPanel.rebuildableTotal)+" "+L("is data the owning apps rebuild","נתונים שהאפליקציות בונות מחדש")+stopped
                 self.updateEnabled()
+                if !jobToken.isCancelled { self.recordHistory(self.locationSizes(self.freeUpPanel.rows.compactMap(\.measurement))) }
+                if jobToken.isCancelled { self.pendingPlanTarget=nil } else if self.pendingPlanTarget != nil { self.applyPendingPlan() } // Stop means stop: no dialog afterwards
             }
         }
     }
@@ -775,6 +802,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
                 guard let findings else { self.status.stringValue = jobToken.isCancelled ? L("Search stopped · nothing added","החיפוש נעצר · לא נוסף דבר") : L("The home folder could not be searched","לא ניתן היה לחפש בתיקיית הבית");self.updateEnabled();return }
                 let added=self.freeUpPanel.addFindings(findings)
                 // The walk measured the whole home folder: when no map is loaded, it becomes the storage map, so mapping home is instant.
+                if reusable == nil, let map=map, !map.cancelled { self.recordHistory(self.homeSizes(map)) }
                 if reusable == nil, self.mapPanel.result == nil, let map=map, !map.cancelled { self.mapRoot=base;self.mapPanel.load(map);self.mapStale=false;self.mapPanel.setStale(false);self.mapMeasuredAt=Date() }
                 let rebuild=findings.filter(\.isRegenerable), review=findings.filter{ !$0.isRegenerable }
                 var text = added == 0 ? L("Nothing more found","לא נמצא דבר נוסף") : "\(added) "+L("more found","נוספים נמצאו")
@@ -1045,6 +1073,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         overviewPanel.update(sessionMoved:totalMovedBytes,trash:freeUpPanel.trashBytes)
         let steps=freeUpPanel.topSteps().map{ OverviewStep(id:$0.location.id,title:LocationTexts.text(for:$0.location).title,bytes:$0.measurement?.bytes ?? 0,safety:$0.location.safety) }
         overviewPanel.setSteps(measured:freeUpPanel.hasMeasurements,canGo:freeUpPanel.movableTotal,other:freeUpPanel.otherTotal,steps:steps)
+        overviewPanel.setGuard(guardState());overviewPanel.floorPopup.isEnabled = !demoMode
     }
     /// Something moved to Trash or came back: the map no longer adds up and the Trash's measured size is out of date.
     func spaceChanged() { markMapStale();freeUpPanel.invalidate("trash") }
@@ -1148,7 +1177,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
                     DispatchQueue.main.async{self.status.stringValue=L("Measured so far: ","נמדדו עד כה: ")+"\(entries) "+L("items","פריטים")+" · "+bytes(total)}
                 }
                 DispatchQueue.main.async {
-                    self.setBusy(false);self.mapStale=false;self.mapMeasuredAt=result.cancelled ? nil : Date();self.mapPanel.load(result);self.mapPanel.setStale(false);self.refreshEmptyState();self.updateSpaceLabel()
+                    self.setBusy(false);self.mapStale=false;self.mapMeasuredAt=result.cancelled ? nil : Date();self.recordHistory(self.homeSizes(result));self.mapPanel.load(result);self.mapPanel.setStale(false);self.refreshEmptyState();self.updateSpaceLabel()
                     self.status.stringValue=self.mapSummary(result);self.window.makeFirstResponder(self.mapPanel.table)
                     if self.pendingLargestReview { self.pendingLargestReview=false;self.reviewLargestFiles() }
                 }
@@ -1635,6 +1664,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     func runSmokeTests() {
         let temp = FileManager.default.temporaryDirectory.appendingPathComponent("avakasha-smoke-" + UUID().uuidString)
+        historyURLOverride=temp.appendingPathComponent("history/space-history.json") // first thing: the test never reads or deletes the real size history
         func cleanup() { try? FileManager.default.removeItem(at: temp); preferences.removePersistentDomain(forName:"Avakasha.SyntheticSmoke") }
         do {
             try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
@@ -1996,6 +2026,23 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             let probe=NSMenu();menuBar.menuNeedsUpdate(probe);let probeTitles=probe.items.map(\.title)
             precondition(probeTitles.contains(L("Check What Can Go…","בדוק מה אפשר לפנות…")) && probeTitles.contains{ $0.hasPrefix(L("Can go to Trash now: ","אפשר להעביר לפח עכשיו: ")) } && probe.items.first{ $0.title == L("Weekly Check & Low-Space Alerts","בדיקה שבועית והתראה על מקום נמוך") }?.state == .on && probeTitles.last == L("Quit Avakasha","צא מ־Avakasha"),"Menu bar menu: \(probeTitles)")
             toggleWeeklyCheck(nil);precondition(!preferences.bool(forKey:"weeklyCheck"))
+            // Space guard: a floor starts a local history (catalogue sizes, never found folders); a plan reaches a target with rebuildable rows only;
+            // the notice opens that plan and its one confirmation, and declining moves nothing; turning the guard off forgets the history.
+            let historyFile=historyURL;spaceHistoryCache=nil;precondition(historyFile.path.hasPrefix(temp.path),"The smoke test uses its own history file")
+            setFloor(1_000_000_000_000_000);precondition(historyEnabled && FileManager.default.fileExists(atPath:historyFile.path) && floorMenuItems.last?.state == .off,"A floor starts the local history")
+            freeUpPanel.invalidate("xcode.derivedData");freeUpPanel.measureAll();settle()
+            let historyText=try String(contentsOf:historyFile,encoding:.utf8);precondition(historyText.contains("loc:xcode.derivedData") && !historyText.contains("find."),"History keeps catalogue sizes, never found folders")
+            let plan=freeUpPanel.showPlan(target:35_000)
+            precondition(!plan.steps.isEmpty && freeUpPanel.selectedRows.allSatisfy(FreeUpPanel.movable) && Set(freeUpPanel.selectedRows.map{$0.location.id}) == Set(plan.steps.map(\.id)) && !freeUpPanel.planLabel.isHidden,"Plan: \(plan.steps.map(\.id))")
+            alerts=[];notifyOverride={ alerts.append(($0,$1)) };var guardDone=false
+            guardCheck(home:fakeHome,force:true){ guardDone=true };let guardDeadline=Date().addingTimeInterval(20);while !guardDone && Date()<guardDeadline { RunLoop.current.run(until:Date().addingTimeInterval(0.01)) }
+            precondition(guardDone && alerts.count == 1 && alerts[0].0.contains(L(" is below your "," מתחת לרף של ")) && (lastNotificationInfo["planTarget"] as? NSNumber) != nil,"Below the floor: one notice with a plan")
+            setOverview(true);precondition(overviewPanel.guardState?.attentionTarget != nil && !overviewPanel.guardPlanButton.isHidden,"The overview offers the plan")
+            folderConfirmationOverride=false;openPlan(35_000);settle();settle()
+            precondition(freeUpMode && pendingPlanTarget == nil && FileManager.default.fileExists(atPath:derivedURL.path) && FileManager.default.fileExists(atPath:modules.path) && status.stringValue.contains(L("Nothing moved","שום דבר לא הועבר")),"The notice opens the plan and its confirmation; declining moves nothing: \(status.stringValue)")
+            folderConfirmationOverride=nil;notifyOverride=nil
+            setFloor(0);precondition(!historyEnabled && !FileManager.default.fileExists(atPath:historyFile.path) && guardState() == nil,"Turning the guard off forgets the history")
+            spaceHistoryCache=nil;preferences.removeObject(forKey:"lastGuardNotice")
             setFreeUp(false);freeUpPanel.setShowSmall(false);home=FileManager.default.homeDirectoryForCurrentUser;freeUpPanel.home=home;try FileManager.default.removeItem(at:fakeHome)
             let savedRoot=root!;activateRoot(temp.appendingPathComponent("other"));precondition(!history.canUndo && !history.canRedo);activateRoot(savedRoot);precondition(history.canRedo)
             toggleTrashConfirmation(confirmationMenuItem!);precondition(!preferences.bool(forKey:"skipTrashConfirmation"))
@@ -2005,7 +2052,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(preferences.bool(forKey:"AppleTextDirection"),"Hebrew must switch the layout direction")
             chooseLanguage(languageItems[0]);precondition(preferences.stringArray(forKey:"AppleLanguages") == ["en"] && !preferences.bool(forKey:"AppleTextDirection"))
             precondition(isCurrentRoot(root!) && !isCurrentRoot(temp.appendingPathComponent("map")),"Clicking the loaded location again must not rescan")
-            print("UI smoke: storage map, largest files, installers, reviewed marks, session space summary, free-up search, overview steps, weekly check, selection, old-file sorting, preview, confirmation preference, Delete, Undo, Redo, blocked-restore retry and held-key protection passed. No real files changed; no windows shown.")
+            print("UI smoke: storage map, largest files, installers, reviewed marks, session space summary, free-up search, overview steps, weekly check, space guard, selection, old-file sorting, preview, confirmation preference, Delete, Undo, Redo, blocked-restore retry and held-key protection passed. No real files changed; no windows shown.")
             cleanup();fflush(stdout);exit(0)
         } catch { fputs("UI smoke failed: \(error)\n",stderr);cleanup();exit(1) }
     }
@@ -2039,6 +2086,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             return L("Could go to Trash on ","אפשר היה להעביר לפח ב־")+DateFormatter.localizedString(from:date,dateStyle:.short,timeStyle:.none)+": "+bytes(total)
         }
         menuBar.weeklyOn={ [weak self] in self?.preferences.bool(forKey:"weeklyCheck") ?? false }
+        menuBar.guardLine={ [weak self] in
+            guard let state=self?.guardState() else { return nil }
+            let pace = state.free < state.floor ? L("below it now","מתחת לרף עכשיו") : (state.forecastDays.map{ L("reached in about \(Int($0.rounded())) days","יגיע בעוד כ־\(Int($0.rounded())) ימים") } ?? L("steady","יציב"))
+            return L("Floor ","רף ")+bytes(state.floor)+" · "+pace
+        }
         menuBar.loginOn={ [weak self] in self?.loginEnabled ?? false }
         menuBar.onOpen={ [weak self] in self?.bringToFront() }
         menuBar.onCheck={ [weak self] in guard let self=self else { return };self.bringToFront();if !self.busy { self.setFreeUp(true) } }
@@ -2059,7 +2111,11 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     @objc func toggleWeeklyCheck(_ sender:NSMenuItem?) {
         let on = !preferences.bool(forKey:"weeklyCheck");preferences.set(on,forKey:"weeklyCheck");weeklyMenuItem?.state = on ? .on : .off
+        if !historyEnabled { forgetHistory() }
         guard on, !smokeMode, !demoMode else { return }
+        requestNotificationsThenTick()
+    }
+    func requestNotificationsThenTick() {
         // The first check waits for the answer to the notification prompt, so its report is not lost while the prompt is open.
         guard canNotify else { DispatchQueue.main.asyncAfter(deadline:.now()+5){ [weak self] in self?.watchTick() };return }
         UNUserNotificationCenter.current().requestAuthorization(options:[.alert]){ [weak self] granted,_ in
@@ -2079,7 +2135,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     /// Hourly: warn once a day when the startup disk runs low, and run the weekly check when it is due. Only when the user turned it on.
     func watchTick() {
         menuBar.refresh()
-        guard preferences.bool(forKey:"weeklyCheck"), !demoMode else { return }
+        guard historyEnabled else { return }
+        recordHistory([:])
+        guardCheck()
+        guard preferences.bool(forKey:"weeklyCheck") else { return }
         if let startup=Volumes.mounted().first(where:\.isStartup), SpaceWatch.shouldWarnLowSpace(available:startup.available,total:startup.total,lastWarned:preferences.object(forKey:"lastLowSpaceWarning") as? Date) {
             preferences.set(Date(),forKey:"lastLowSpaceWarning")
             notify(startup.name+L(" is almost full"," כמעט מלא"),bytes(startup.available)+L(" free. Open Avakasha to see what can go."," פנויים. פותחים את Avakasha כדי לראות מה אפשר לפנות."))
@@ -2093,17 +2152,12 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         weeklyRunning=true
         let previous=(preferences.object(forKey:"lastWeeklyCanGo") as? NSNumber)?.int64Value, minimum=weeklyMinimum
         watchQueue.async {
-            let token=CancellationToken()
-            // Other apps' containers are left out: reading them from an hourly timer could raise a macOS prompt nobody asked for.
-            let measured=(KnownLocations.present(in:base)+KnownLocations.cacheFolders(in:base))
-                .filter{ $0.safety == .rebuildable && !$0.relativePath.hasPrefix("Library/Containers/") && !$0.relativePath.hasPrefix("Library/Group Containers/") }
-                .map{ KnownLocations.measure($0,home:base,token:token) }
-            let paths=measured.map{ $0.location.relativePath }
-            let total=measured.filter{ m in m.error == nil && !paths.contains{ $0 != m.location.relativePath && m.location.relativePath.hasPrefix($0+"/") } }.reduce(Int64(0)){ $0+$1.bytes }
+            let measured=Self.measureRebuildable(base)
+            let total=Self.outermost(measured).reduce(Int64(0)){ $0+$1.bytes }
             let report=SpaceWatch.weeklyReport(previous:previous,current:total,minimum:minimum)
             DispatchQueue.main.async {
                 self.weeklyRunning=false
-                self.preferences.set(Date(),forKey:"lastWeeklyCheck");self.preferences.set(NSNumber(value:total),forKey:"lastWeeklyCanGo")
+                self.preferences.set(Date(),forKey:"lastWeeklyCheck");self.preferences.set(NSNumber(value:total),forKey:"lastWeeklyCanGo");self.recordHistory(self.locationSizes(measured))
                 // The fresh sizes also fill Free up space and the overview, so opening the app shows them.
                 if self.freeUpPanel.home.standardizedFileURL.path == base.standardizedFileURL.path {
                     if self.freeUpPanel.rows.isEmpty { self.freeUpPanel.reload(keepMeasurements:true) }
@@ -2120,16 +2174,127 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             }
         }
     }
-    func notify(_ title:String,_ body:String) {
+    func notify(_ title:String,_ body:String,info:[String:Any]=[:]) {
+        lastNotificationInfo=info
         if let capture=notifyOverride { capture(title,body);return }
         guard canNotify, !smokeMode else { return }
-        let content=UNMutableNotificationContent();content.title=title;content.body=body
+        let content=UNMutableNotificationContent();content.title=title;content.body=body;content.userInfo=info
         UNUserNotificationCenter.current().add(UNNotificationRequest(identifier:UUID().uuidString,content:content,trigger:nil))
     }
     func userNotificationCenter(_ center:UNUserNotificationCenter,didReceive response:UNNotificationResponse,withCompletionHandler completionHandler:@escaping ()->Void) {
-        DispatchQueue.main.async { self.bringToFront();if !self.busy { self.setOverview(true) } };completionHandler()
+        let target=(response.notification.request.content.userInfo["planTarget"] as? NSNumber)?.int64Value
+        DispatchQueue.main.async { if let target=target { self.openPlan(target) } else { self.bringToFront();if !self.busy { self.setOverview(true) } } };completionHandler()
     }
     func userNotificationCenter(_ center:UNUserNotificationCenter,willPresent notification:UNNotification,withCompletionHandler completionHandler:@escaping (UNNotificationPresentationOptions)->Void) { completionHandler([.banner]) }
+
+    // MARK: Space guard
+    /// The rebuildable known locations, measured off the main thread. Other apps' containers are left out: reading them from a timer
+    /// could raise a macOS prompt nobody asked for.
+    static func measureRebuildable(_ base:URL) -> [LocationMeasurement] {
+        let token=CancellationToken()
+        return (KnownLocations.present(in:base)+KnownLocations.cacheFolders(in:base))
+            .filter{ $0.safety == .rebuildable && !$0.relativePath.hasPrefix("Library/Containers/") && !$0.relativePath.hasPrefix("Library/Group Containers/") }
+            .map{ KnownLocations.measure($0,home:base,token:token) }
+    }
+    /// Measured rows not inside another measured row, so nothing is counted twice.
+    static func outermost(_ measured:[LocationMeasurement]) -> [LocationMeasurement] {
+        let paths=measured.map{ $0.location.relativePath }
+        return measured.filter{ m in m.error == nil && !paths.contains{ $0 != m.location.relativePath && m.location.relativePath.hasPrefix($0+"/") } }
+    }
+    /// History keys: catalogue ids only (never folders the search found, whose names are yours).
+    func locationSizes(_ measured:[LocationMeasurement]) -> [String:Int64] {
+        Dictionary(measured.filter{ $0.error == nil && !$0.cancelled && !$0.location.id.hasPrefix("find.") }.map{ ("loc:"+$0.location.id,$0.bytes) },uniquingKeysWith:{ a,_ in a })
+    }
+    /// The home folder's own folders and those directly in Library, from a complete map of the home folder.
+    func homeSizes(_ map:StorageMapResult) -> [String:Int64] {
+        guard !map.cancelled, let base=try? FileSafety.root(FileManager.default.homeDirectoryForCurrentUser), map.root.url.standardizedFileURL.path == base.standardizedFileURL.path else { return [:] }
+        var sizes:[String:Int64]=[:]
+        // Hidden folders (".ssh", ".config") are left out: their names say more about you than about space.
+        for child in map.root.children where !child.isUnreadable && !child.name.hasPrefix(".") {
+            sizes["home:"+child.name]=child.bytes
+            if child.name == "Library" { for inner in child.children where !inner.isUnreadable && !inner.name.hasPrefix(".") { sizes["home:Library/"+inner.name]=inner.bytes } }
+        }
+        return sizes
+    }
+    func currentHistory() -> SpaceHistory { if let h=spaceHistoryCache { return h };let h=SpaceHistoryStore.load(from:historyURL);spaceHistoryCache=h;return h }
+    func recordHistory(_ sizes:[String:Int64]) {
+        guard historyEnabled, let startup=Volumes.mounted().first(where:\.isStartup) else { return }
+        var h=currentHistory();h.record(SpaceSample(date:Date(),free:startup.available,sizes:sizes));spaceHistoryCache=h
+        try? SpaceHistoryStore.save(h,to:historyURL)
+    }
+    func forgetHistory() { spaceHistoryCache=nil;try? FileManager.default.removeItem(at:historyURL) }
+    @objc func forgetHistoryCommand() { forgetHistory();if overviewMode { refreshOverview() };status.stringValue=L("Size history forgotten","היסטוריית הגדלים נמחקה") }
+    @objc func chooseFloor(_ sender:NSMenuItem) { setFloor((sender.representedObject as? NSNumber)?.int64Value ?? 0) }
+    func setFloor(_ value:Int64) {
+        guard !demoMode else { return }
+        let wasOn=floorBytes > 0
+        preferences.set(NSNumber(value:value),forKey:"floorBytes")
+        floorMenuItems.forEach{ $0.state = ($0.representedObject as? NSNumber)?.int64Value == value ? .on : .off }
+        if !historyEnabled { forgetHistory() } else { recordHistory([:]) }
+        if overviewMode { refreshOverview() }
+        if value > 0, !wasOn, !smokeMode { requestNotificationsThenTick() } else if value > 0, !smokeMode { watchTick() }
+    }
+    /// What the overview shows about the guard, or nil when no floor is set.
+    func guardState() -> GuardState? {
+        let floor=floorBytes
+        guard floor > 0, !demoMode, let startup=Volumes.mounted().first(where:\.isStartup) else { return nil }
+        let history=currentHistory()
+        let days=SpaceForecast.daysUntil(floor:floor,history:history)
+        let span=history.samples.first.map{ Int(Date().timeIntervalSince($0.date)/86_400) } ?? 0
+        var growthLine:String?
+        if let g=history.growth(days:7), !g.grown.isEmpty || g.freeChange != 0 {
+            var parts=g.grown.filter{ $0.key != "home:Library" }.map{ historyTitle($0.key)+" +"+bytes($0.delta) } // Library's own folders are listed instead of Library as a whole
+            parts.append(L("free ","פנוי ")+(g.freeChange >= 0 ? "+" : "−")+bytes(abs(g.freeChange)))
+            growthLine=L("Since ","מאז ")+DateFormatter.localizedString(from:g.since,dateStyle:.medium,timeStyle:.none)+": "+parts.joined(separator:" · ")
+        }
+        let attention=SpaceGuard.needsAttention(free:startup.available,floor:floor,forecastDays:days) ? SpaceGuard.target(free:startup.available,floor:floor) : nil
+        return GuardState(floor:floor,volumeName:startup.name,free:startup.available,forecastDays:days,historyDays:span,growthLine:growthLine,attentionTarget:attention)
+    }
+    func historyTitle(_ key:String) -> String {
+        if key.hasPrefix("home:") { return String(key.dropFirst(5)) }
+        let id=String(key.dropFirst(4))
+        return LocationTexts.text(for:KnownLocations.all.first{ $0.id == id } ?? KnownLocation(id:id,relativePath:"",category:KnownLocations.apps,safety:.rebuildable)).title
+    }
+    /// Near or below the floor: measure the rebuildable known locations, build a plan, and send one notice (at most every two days).
+    /// A click on it opens the plan in Free up space and its confirmation; nothing moves before that.
+    func guardCheck(home base:URL=FileManager.default.homeDirectoryForCurrentUser,force:Bool=false,completion:(()->Void)?=nil) {
+        let floor=floorBytes
+        guard floor > 0, !weeklyRunning, !demoMode, let startup=Volumes.mounted().first(where:\.isStartup) else { completion?();return }
+        let days=SpaceForecast.daysUntil(floor:floor,history:currentHistory())
+        guard SpaceGuard.needsAttention(free:startup.available,floor:floor,forecastDays:days),
+              force || SpaceWatch.isDue(last:preferences.object(forKey:"lastGuardNotice") as? Date,interval:2*24*3600) else { completion?();return }
+        let target=SpaceGuard.target(free:startup.available,floor:floor)
+        weeklyRunning=true
+        watchQueue.async {
+            let measured=Self.measureRebuildable(base)
+            let plan=CleanupPlan.make(target:target,items:Self.outermost(measured).map{ PlanItem(id:$0.location.id,bytes:$0.bytes,movable:true) })
+            DispatchQueue.main.async {
+                self.weeklyRunning=false;self.preferences.set(Date(),forKey:"lastGuardNotice");self.recordHistory(self.locationSizes(measured))
+                if self.freeUpPanel.home.standardizedFileURL.path == base.standardizedFileURL.path {
+                    if self.freeUpPanel.rows.isEmpty { self.freeUpPanel.reload(keepMeasurements:true) }
+                    let open=Set(self.freeUpPanel.rows.filter{ $0.measurement == nil && !$0.moved }.map{ $0.location.id })
+                    measured.filter{ open.contains($0.location.id) }.forEach{ self.freeUpPanel.apply($0) }
+                }
+                let title = startup.available < floor ? startup.name+L(" is below your "," מתחת לרף של ")+bytes(floor)+L(" floor","")
+                    : startup.name+L(" reaches your "," יגיע לרף של ")+bytes(floor)+L(" floor in about \(max(1,Int((days ?? 0).rounded()))) days"," בעוד כ־\(max(1,Int((days ?? 0).rounded()))) ימים")
+                let body = plan.total > 0 ? bytes(plan.total)+L(" of data the owning apps rebuild can go to Trash. Click to review the plan and confirm."," של נתונים שהאפליקציות בונות מחדש אפשר להעביר לפח. לוחצים כדי לעבור על התוכנית ולאשר.")
+                    : L("Nothing rebuildable is large enough. Click to see what grew and review it.","אין מספיק נתונים שנבנים מחדש. לוחצים כדי לראות מה גדל ולסקור.")
+                self.notify(title,body,info:plan.total > 0 ? ["planTarget":NSNumber(value:target)] : [:])
+                if self.overviewMode { self.refreshOverview() };completion?()
+            }
+        }
+    }
+    /// Opens Free up space with a plan for `target` and, once measured, the one confirmation that lists every folder in it.
+    func openPlan(_ target:Int64) {
+        bringToFront();guard !busy, NSApp.modalWindow == nil else { return } // never a second dialog on top of an open one
+        pendingPlanTarget=target;setFreeUp(true)
+        if !busy { applyPendingPlan() }
+    }
+    func applyPendingPlan() {
+        guard let target=pendingPlanTarget, freeUpMode else { pendingPlanTarget=nil;return };pendingPlanTarget=nil
+        let plan=freeUpPanel.showPlan(target:target)
+        if !plan.steps.isEmpty { freeUpPanel.trashSelected() }
+    }
 }
 let launchArguments=ProcessInfo.processInfo.arguments
 if let index=launchArguments.firstIndex(of:"--language"), index+1<launchArguments.count, AppLanguage.supported.contains(where:{$0.0 == launchArguments[index+1]}) {
