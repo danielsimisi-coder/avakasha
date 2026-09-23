@@ -19,8 +19,8 @@ artwork = {
     'assets/keepelix-hebrew.png': {'35d47605559f3408daf487d12b490cbc8e4b0d4ad226456528891ec449591659'},
     'assets/keepelix-video.png': {'42245c97681e81e00d511b253f803c4471bd5739115b8d6619965edd8ae52bb7'},
     'assets/avakasha-overview.png': {'e4bd01bce6cd5156521ffc8058a044a2165ee49e6d3fe4c8f43d1b6805bf07d1'},
-    'assets/icon-1024.png': {'95ff2ed3079abdc2143948ec1586c53a19fbdeb30ecbefa06d37c99f2129531b', '019380b7d4997cc8c8f83ea40672fac25bdd2a4f10c6f69fcb7eaa9c75132db7'},
-    'assets/AppIcon.icns': {'9f603b3652db574dae84fa3b67f738a1455618a58590204bdee54be5f574dc97', '876a9099c5e0b7aec0a93ea8c2b68adc394d9accaaf2cfb2862ac749a50df7be'},
+    'assets/icon-1024.png': {'95ff2ed3079abdc2143948ec1586c53a19fbdeb30ecbefa06d37c99f2129531b', '019380b7d4997cc8c8f83ea40672fac25bdd2a4f10c6f69fcb7eaa9c75132db7', '0038e5159ab8ece2b1cd6a8ac3decd1b9898a339b5b752a98982ff988e845880'},
+    'assets/AppIcon.icns': {'9f603b3652db574dae84fa3b67f738a1455618a58590204bdee54be5f574dc97', '876a9099c5e0b7aec0a93ea8c2b68adc394d9accaaf2cfb2862ac749a50df7be', '3921996f52761b7b2a89c3c551b5eacbe05819949872145da99450831d1b2065'},
 }
 failures = []
 patterns = [

@@ -11,7 +11,7 @@ let glow = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [CGCol
 c.drawRadialGradient(glow, startCenter: CGPoint(x: 512, y: 560), startRadius: 60, endCenter: CGPoint(x: 512, y: 560), endRadius: 420, options: [])
 let sun = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: [CGColor(red: 1.0, green: 0.93, blue: 0.72, alpha: 1), CGColor(red: 0.99, green: 0.72, blue: 0.40, alpha: 1)] as CFArray, locations: [0, 1])!
 c.saveGState(); c.addEllipse(in: CGRect(x: 512 - 190, y: 560 - 190, width: 380, height: 380)); c.clip()
-c.drawRadialGradient(sun, startCenter: CGPoint(x: 470, y: 620), startRadius: 20, endCenter: CGPoint(x: 512, y: 560), endRadius: 210, options: [])
+c.drawRadialGradient(sun, startCenter: CGPoint(x: 470, y: 620), startRadius: 20, endCenter: CGPoint(x: 512, y: 560), endRadius: 210, options: [.drawsBeforeStartLocation, .drawsAfterEndLocation])
 c.restoreGState()
 // Clean horizon band.
 c.setFillColor(CGColor(red: 0.07, green: 0.20, blue: 0.30, alpha: 1))

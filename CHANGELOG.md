@@ -2,6 +2,7 @@
 
 ## 0.1.0-beta.10
 
+- Fix a small unfilled spot in the app icon's sun.
 - Public open-source release on GitHub.
 - The sidebar shows the app's real icon next to the name, the same image Finder and the Dock draw.
 - Interface pass from a panel of UX, accessibility and localisation reviews: sidebar in three sections (Start, Locations, Tools), window subtitle names the current place, one "moved to Trash · Undo" line after every move, File and View menus with a key for every command, a five-step type scale, caveats behind info buttons, grey data bars with colour reserved for interaction, Return cancels every Trash confirmation, sidebar exposed to VoiceOver as a radio group, focus follows scans, gender-neutral Hebrew and one glossary in both languages.
