@@ -26,6 +26,19 @@ VERSION='0.1.0' ./scripts/build-app.sh
 
 Set `DIST_DIR` to write the archive somewhere other than `dist/`. The script refuses a `SIGN_IDENTITY` that is not in the keychain and warns when it is not a Developer ID Application identity: an Apple Development certificate can exercise the signing branch locally, but Gatekeeper on other Macs will not accept it and Apple will not notarize it.
 
+### One-time setup for a notarized release
+
+These steps belong to the account holder; Avakasha's scripts never see a password or a private key.
+
+1. Join the Apple Developer Program (paid, yearly) at developer.apple.com/programs/enroll and wait for the approval.
+2. In Xcode › Settings › Accounts, select the Apple ID, then Manage Certificates › + › **Developer ID Application**. The certificate and its private key stay in your login keychain.
+3. At account.apple.com › Sign-In and Security › App-Specific Passwords, create a password named for example "avakasha-notary".
+4. Store it for `notarytool` once, in Terminal (it asks for the app-specific password and keeps it in the keychain):
+   `xcrun notarytool store-credentials avakasha-notary --apple-id YOUR_APPLE_ID --team-id YOUR_TEAM_ID`
+5. Build with both set. The script signs with the hardened runtime and a secure timestamp, submits the archive, stops with Apple's log unless the status is **Accepted**, staples the ticket, checks it with `stapler validate` and `spctl --assess`, and only then rewrites the archive and prints `NOTARIZED`.
+
+The hardened-runtime build has been checked locally with an Apple Development identity (the app launches and runs its demo views with no extra entitlements); that build is not distributable.
+
 The profile must already be configured using Apple's `notarytool`. Never commit private keys, certificates or passwords. The script submits to Apple only when `NOTARY_PROFILE` is explicitly set. Review Apple's current Developer ID and notarization requirements before release.
 
 - https://developer.apple.com/developer-id/

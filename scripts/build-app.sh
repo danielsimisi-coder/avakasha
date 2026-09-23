@@ -28,7 +28,9 @@ strip -S "$app/Contents/MacOS/Avakasha"
 /usr/libexec/PlistBuddy -c 'Add :CFBundleLocalizations array' -c 'Add :CFBundleLocalizations:0 string en' -c 'Add :CFBundleLocalizations:1 string he' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :CFBundlePackageType string APPL' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string ${version%%-*}" "$app/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c 'Add :CFBundleVersion string 11' "$app/Contents/Info.plist"
+# The build number is the prerelease number ("0.1.0-beta.18" → 18), so each release is newer than the last.
+build_number="${version##*.}"; case "$build_number" in ''|*[!0-9]*) build_number=1 ;; esac
+/usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $build_number" "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :LSMinimumSystemVersion string 13.0' "$app/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c 'Add :NSHighResolutionCapable bool true' "$app/Contents/Info.plist"
 if [ -f assets/AppIcon.icns ]; then
@@ -49,10 +51,21 @@ archive="$dist_dir/Avakasha-$version-universal.zip"
 ditto --norsrc --noextattr -c -k --keepParent "$app" "$archive"
 if [ -n "${NOTARY_PROFILE:-}" ]; then
   test -n "${SIGN_IDENTITY:-}" || { echo 'NOTARY_PROFILE requires SIGN_IDENTITY'; exit 1; }
-  xcrun notarytool submit "$archive" --keychain-profile "$NOTARY_PROFILE" --wait
+  case "$SIGN_IDENTITY" in "Developer ID Application:"*) ;; *) echo 'Notarization needs a Developer ID Application identity.'; exit 1 ;; esac
+  # Apple's verdict decides: anything but "Accepted" prints Apple's log and stops, and nothing is labelled notarized.
+  result="$(xcrun notarytool submit "$archive" --keychain-profile "$NOTARY_PROFILE" --wait --output-format json)"
+  echo "$result"
+  field() { printf '%s' "$result" | /usr/bin/python3 -c "import json,sys; print(json.load(sys.stdin).get('$1',''))"; }
+  if [ "$(field status)" != "Accepted" ]; then
+    xcrun notarytool log "$(field id)" --keychain-profile "$NOTARY_PROFILE" || true
+    echo "NOT NOTARIZED: Apple returned status '$(field status)'."
+    exit 1
+  fi
   xcrun stapler staple "$app"
   xcrun stapler validate "$app"
+  spctl --assess --type execute -vv "$app" # Gatekeeper must accept the stapled app as a downloaded one would be
   ditto --norsrc --noextattr -c -k --keepParent "$app" "$archive"
+  echo 'NOTARIZED: Developer ID signed, accepted by Apple, ticket stapled and validated.'
 fi
 (cd "$dist_dir" && shasum -a 256 "$(basename "$archive")") > "$archive.sha256"
 echo "$archive"
