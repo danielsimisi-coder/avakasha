@@ -62,7 +62,7 @@ Click **Free up space** in the sidebar. Avakasha lists the places from a built-i
 - **Cleared on restart**: temporary system data macOS clears by itself.
 - **Review before touching**: personal or app data that only looks like clutter (Xcode archives, WhatsApp media, Zoom data, the whole `Library/Caches`). Review it file by file or leave it.
 
-Listing reads folder names only. Opening the screen measures each location's size (names and sizes, never contents); Esc stops and keeps what was measured. A summary on top says how much can go to Trash now, how much needs the owning app, and how much is Terminal-only. **Select all that can go** picks every rebuildable row; **Move to Trash…** moves them in one step that a single ⌘Z undoes. Rows the app will not move get one action instead: **Open Mail / Docker / Chrome…**, **Review files here**, or **Copy command & open Terminal** (the command is copied, never run). Items under 100 MB are tucked away behind **Show small items**. **Show in Finder** reveals any row that is still on disk. **Move to Trash…** uses the same guarded flow as the map, with your home folder as the safety root: check, fresh measurement, refusal on unmeasured items, a confirmation that is always shown, one Trash item, Undo with ⌘Z and no Redo. The app never touches Mail, Chrome profiles, Messages, backups or any other non-rebuildable row by itself. The verdict is a judgement written into the catalogue, not a guarantee; the summary line tells you how much of what was measured is data the owning apps rebuild, and you decide.
+Listing reads folder names only. Opening the screen measures each location's size (names and sizes, never contents); Esc stops and keeps what was measured. A summary on top says how much can go to Trash now, how much needs the owning app, and how much is Terminal-only. **Select all that can go** picks every rebuildable row; **Move to Trash…** moves them in one step that a single ⌘Z undoes. Rows the app will not move get one action instead: **Open Mail / Docker / Chrome…**, **Review files here**, or **Copy command & open Terminal** (the command is copied, never run). Items under 100 MB are tucked away behind **Show small items**. **Find more in your home folder** (⇧⌘M) goes further than the catalogue: it walks the whole home folder once (names, sizes and dates only) and adds three kinds of findings. Folders whose name says they are regenerated (a project's `node_modules`, DerivedData, `__pycache__`, Adobe media caches and render previews, app caches inside Library) can go to Trash like any rebuildable row. Data left by apps that are no longer installed, and folders over 1 GB where nothing changed for six months, are for review only. Each finding says how it was found and what you lose if it goes, next to its size and verdict. iCloud Drive, Trash, Mail, Messages, Photos, Apple's own data and dot-folders such as `~/.vscode` are never searched. **Show in Finder** reveals any row that is still on disk. **Move to Trash…** uses the same guarded flow as the map, with your home folder as the safety root: check, fresh measurement, refusal on unmeasured items, a confirmation that is always shown, one Trash item, Undo with ⌘Z and no Redo. The app never touches Mail, Chrome profiles, Messages, backups or any other non-rebuildable row by itself. The verdict is a judgement written into the catalogue, not a guarantee; the summary line tells you how much of what was measured is data the owning apps rebuild, and you decide.
 
 ![File review with a Quick Look preview, generated demo files](assets/avakasha-preview.png)
 
@@ -125,6 +125,7 @@ The same app in Hebrew, mirrored right-to-left, chosen from the Language menu:
 | `Return` or `⌘↓` (map) | Open the selected folder in the storage map |
 | `⌘↑` (map) | Go up one folder in the storage map |
 | `Delete` / `⌘⌫` (map, Free up space) | Move the selected folder to Trash after a fresh measurement and a confirmation that is always shown |
+| `⇧⌘M` | Find more in your home folder (Free up space); Esc stops the search |
 
 ## WhatsApp: groups and personal chats
 
@@ -188,7 +189,7 @@ docs/                    Privacy, safety, release and contributor guidance
 
 ## Status and contribution
 
-This is beta 11. Code compilation and automated tests are not substitutes for testing on every macOS version. The Intel slice is cross-built; real Intel-machine verification and clean-Mac Gatekeeper verification are release checklist items, not implied claims.
+This is beta 12. Code compilation and automated tests are not substitutes for testing on every macOS version. The Intel slice is cross-built; real Intel-machine verification and clean-Mac Gatekeeper verification are release checklist items, not implied claims.
 
 The interface is English by default. **Avakasha › Language › עברית** switches the whole app to Hebrew with right-to-left layout on the next launch (the choice is stored for this app only). Contributions to accessibility, localisation and synthetic-fixture coverage are welcome. See [CONTRIBUTING](CONTRIBUTING.md), [SECURITY](SECURITY.md), and [CHANGELOG](CHANGELOG.md).
 

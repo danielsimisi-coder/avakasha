@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.0-beta.12
+
+- **Find more in your home folder** (Free up space, or ⇧⌘M) looks through the whole home folder with the storage-map walker (names, sizes and dates only) and adds what it finds to the list, each with its size and verdict:
+  - Folders whose name says they are regenerated: a project's `node_modules` (beside a `package.json`, outside Library), DerivedData, `__pycache__`, Adobe media caches, peak files, "Adobe … Previews" and `.PRV` render folders; generic cache folders (Cache, Code Cache, GPUCache and similar) only inside Library. These can go to Trash through the usual guarded flow. Dot-named caches such as `.gradle` or `.next` are not offered, since hidden folders are never moved whole.
+  - Data an app left behind: folders over 100 MB in Application Support, Containers, Group Containers, Caches and Documents/Adobe whose app is not installed (matched generously against the apps' names and bundle identifiers). Review only.
+  - Folders over 1 GB where nothing changed for six months or more, one level inside the home folder's own folders. Review only.
+  - Each finding says what it is, how it was found and what you lose if it goes.
+- The search never looks inside iCloud Drive and other cloud folders, Trash, Mail, Messages, Photos or Apple's own app data, never under dot-folders such as `~/.vscode` or `~/.nvm` (a `node_modules` there is the tool itself), and never lists a folder the catalogue already shows.
+- Storage map nodes record the newest modification time inside them, bundles included.
+- The confirmation for several folders shows the path of each found folder.
+
 ## 0.1.0-beta.11
 
 - Free up space measures as soon as it opens (names and sizes only; Esc stops) and shows a summary: how much can go to Trash now, how much needs the owning app, how much is Terminal-only, how much to review.

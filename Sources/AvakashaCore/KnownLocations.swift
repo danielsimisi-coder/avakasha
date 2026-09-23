@@ -35,6 +35,9 @@ public struct LocationMeasurement: Equatable {
     public let files: Int
     public let cancelled: Bool
     public let error: String?
+    public init(location: KnownLocation, bytes: Int64, files: Int, cancelled: Bool = false, error: String? = nil) {
+        self.location = location; self.bytes = bytes; self.files = files; self.cancelled = cancelled; self.error = error
+    }
 }
 
 public enum KnownLocations {

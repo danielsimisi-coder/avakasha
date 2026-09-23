@@ -18,6 +18,8 @@ public final class StorageNode {
     /// Allocated bytes of the regular files directly inside this folder (not in subfolders).
     public private(set) var directBytes: Int64 = 0
     public private(set) var files: Int = 0
+    /// Modification time (seconds since 1970) of the newest regular file anywhere below this folder; 0 when it holds none.
+    public private(set) var newestModified: Int64 = 0
     public private(set) var directFiles: Int = 0
     public private(set) var directories: Int = 0
     /// Entries (files or folders) that could not be read or stat'd anywhere below this folder.
@@ -33,6 +35,7 @@ public final class StorageNode {
         self.url = url; self.name = name; self.isHidden = isHidden; self.isPackage = isPackage; self.isUnreadable = isUnreadable
     }
     func addFile(bytes allocated: Int64) { directBytes += allocated; bytes += allocated; directFiles += 1; files += 1 }
+    func noteModified(_ seconds: Int64) { if seconds > newestModified { newestModified = seconds } }
     func addSharedFile() { directFiles += 1; files += 1 }
     func addInaccessible() { inaccessible += 1 }
     func addNotDownloaded() { notDownloaded += 1 }
@@ -41,7 +44,7 @@ public final class StorageNode {
         if isDirectory { directories += 1 } else { bytes += allocated; files += 1 }
     }
     func absorb(_ child: StorageNode) {
-        child.parent = self; children.append(child)
+        child.parent = self; children.append(child); noteModified(child.newestModified)
         bytes += child.bytes; files += child.files; directories += child.directories + 1
         inaccessible += child.inaccessible; notDownloaded += child.notDownloaded; otherVolumes += child.otherVolumes
     }
@@ -172,14 +175,14 @@ public enum StorageMapper {
                 stack.last!.absorb(node)
             case FTS_F:
                 guard let node = stack.last, let s = statp else { continue }
-                if insidePackage { node.addPackageEntry(bytes: dataless ? 0 : Int64(s.pointee.st_blocks) * 512, isDirectory: false); continue }
+                if insidePackage { node.addPackageEntry(bytes: dataless ? 0 : Int64(s.pointee.st_blocks) * 512, isDirectory: false); node.noteModified(Int64(s.pointee.st_mtimespec.tv_sec)); continue }
                 if dataless { node.addNotDownloaded(); node.addSharedFile(); continue }
                 if s.pointee.st_nlink > 1 {
                     let key = "\(s.pointee.st_dev):\(s.pointee.st_ino)"
                     if !seenLinks.insert(key).inserted { sharedFiles += 1; node.addSharedFile(); continue }
                 }
                 let allocated = Int64(s.pointee.st_blocks) * 512
-                node.addFile(bytes: allocated)
+                node.addFile(bytes: allocated); node.noteModified(Int64(s.pointee.st_mtimespec.tv_sec))
                 // fts_path ends with the entry's name, so its last fts_namelen bytes are the name without copying the struct.
                 let namePtr = e.fts_path + Int(e.fts_pathlen) - Int(e.fts_namelen)
                 guard largest.admits(bytes: allocated), namePtr.pointee != 0x2E /* "." */, flags & UF_HIDDEN_FLAG == 0,

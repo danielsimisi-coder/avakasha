@@ -7,7 +7,10 @@ struct LocationText {
 }
 
 enum LocationTexts {
+    /// Wording for folders found by searching, keyed by their generated id.
+    static var found: [String: LocationText] = [:]
     static func text(for location: KnownLocation) -> LocationText {
+        if let text = found[location.id] { return text }
         if location.id.hasPrefix("cache.") {
             let app = String(location.id.dropFirst(6))
             return LocationText(title: L("App cache: ", "מטמון אפליקציה: ") + app,
@@ -106,6 +109,43 @@ enum RowAction: Equatable {
     case none
 }
 
+/// Folders the search found, turned into rows: an id, a place in the list, a safety verdict and the words that explain it.
+enum FoundLocations {
+    static let rebuild = "found.rebuild", leftover = "found.leftover", untouched = "found.untouched"
+    static func location(for finding: Finding, home: URL) -> (KnownLocation, LocationText)? {
+        let base = home.standardizedFileURL.resolvingSymlinksInPath().path, path = finding.url.standardizedFileURL.path
+        guard path.hasPrefix(base + "/") else { return nil }
+        let relative = String(path.dropFirst(base.count + 1)), name = finding.url.lastPathComponent, parent = finding.url.deletingLastPathComponent().lastPathComponent
+        let id = "find." + relative
+        switch finding.kind {
+        case .regenerable(let pattern):
+            let (what, next): (String, String)
+            switch pattern {
+            case "node_modules": (what, next) = (L("Packages installed for this project.", "חבילות שהותקנו עבור הפרויקט הזה."), L("Run npm install (or your package manager) in the project to get them back.", "מריצים npm install (או את מנהל החבילות) בפרויקט כדי להחזיר אותן."))
+            case "deriveddata": (what, next) = (L("Xcode build products.", "תוצרי בנייה של Xcode."), L("Xcode rebuilds them on the next build.", "Xcode בונה אותם מחדש בבנייה הבאה."))
+            case "__pycache__": (what, next) = (L("Compiled Python files.", "קובצי Python מהודרים."), L("Recreated the next time the code or tool runs.", "נוצרים מחדש בהרצה הבאה של הקוד או הכלי."))
+            case "media cache", "media cache files", "peak files", "adobe render": (what, next) = (L("Previews and audio waveforms an editing app rendered.", "תצוגות מקדימות וצורות גל שתוכנת עריכה יצרה."), L("Rendered again when the project is opened; the first playback may be slower.", "נוצרים שוב כשפותחים את הפרויקט; הניגון הראשון עלול להיות איטי יותר."))
+            default: (what, next) = (L("A cache an app keeps to load faster.", "מטמון שאפליקציה שומרת כדי להיטען מהר יותר."), L("The app rebuilds it. It may be slower once, and some apps ask you to sign in again.", "האפליקציה בונה אותו מחדש. היא עלולה להיות איטית פעם אחת, וחלק מהאפליקציות יבקשו להתחבר שוב."))
+            }
+            return (KnownLocation(id: id, relativePath: relative, category: rebuild, safety: .rebuildable),
+                    LocationText(title: name + " · " + parent, what: what + " " + L("Found by its name.", "נמצא לפי השם שלו."), next: next, howTo: nil))
+        case .leftover(let owner):
+            return (KnownLocation(id: id, relativePath: relative, category: leftover, safety: .keepOrReview),
+                    LocationText(title: L("Left by ", "נשאר מ־") + owner,
+                                 what: L("Data of an app that does not seem to be installed: no app matching “\(owner)” was found.", "נתונים של אפליקציה שנראה שאינה מותקנת: לא נמצאה אפליקציה שמתאימה ל־״\(owner)״."),
+                                 next: L("If you install it again, its settings and data will be gone.", "אם מתקינים אותה שוב, ההגדרות והנתונים שלה לא יהיו."),
+                                 howTo: L("It may belong to a command-line tool or a plugin. Review the files, or show the folder in Finder and decide there.", "ייתכן שהיא שייכת לכלי שורת פקודה או לתוסף. סוקרים את הקבצים, או מציגים את התיקייה ב־Finder ומחליטים שם.")))
+        case .untouched(let months):
+            let span = months >= 24 ? L("\(months / 12) years", "\(months / 12) שנים") : L("\(months) months", "\(months) חודשים")
+            return (KnownLocation(id: id, relativePath: relative, category: untouched, safety: .keepOrReview),
+                    LocationText(title: name,
+                                 what: L("Nothing inside changed in ", "שום דבר בפנים לא השתנה כבר ") + span + ".",
+                                 next: L("Untouched for ", "ללא שינוי ") + span + L(". It may be your only copy.", ". ייתכן שזה העותק היחיד."),
+                                 howTo: L("Review the files here, or copy them to an external drive before removing anything.", "סוקרים את הקבצים כאן, או מעתיקים לכונן חיצוני לפני שמסירים משהו.")))
+        }
+    }
+}
+
 final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
     struct Row { let location: KnownLocation; var measurement: LocationMeasurement?; var moved = false }
     static func action(for location: KnownLocation, home: URL) -> RowAction {
@@ -136,6 +176,11 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
     /// Summary card on top: how much can go now, how much needs its app or Terminal.
     let summaryLabel = NSTextField(wrappingLabelWithString: "")
     let selectRebuildableButton = NSButton(), smallButton = NSButton()
+    /// Searches the whole home folder for more: regenerable folders by name, data of removed apps, folders untouched for months.
+    let findButton = NSButton()
+    /// Rows the search found. They stay until the screen reloads and their folder is gone.
+    private(set) var foundLocations: [KnownLocation] = []
+    private var foundHome: String?
     /// Rows measured below this size are tucked away until "Show small items".
     var minimumVisibleBytes: Int64 = 100_000_000
     private(set) var showSmall = false
@@ -159,6 +204,7 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
     var onReveal: ((URL) -> Void)?
     var onCopyCommand: ((String) -> Void)?
     var onSelectionChange: (() -> Void)?
+    var onFind: (() -> Void)?
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -171,7 +217,8 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
             button.font = Type.bodyMedium; button.setAccessibilityLabel(L(en, he))
         }
         trashButton.image = symbol("trash", 13, .medium, color: .systemRed) // red on the glyph only
-        for (button, en, he, action) in [(selectRebuildableButton, "Select all that can go", "בחר את כל מה שאפשר לפנות", #selector(selectRebuildable)),
+        for (button, en, he, action) in [(findButton, "Find more in your home folder", "חפש עוד בתיקיית הבית", #selector(findMore)),
+                                          (selectRebuildableButton, "Select all that can go", "בחר את כל מה שאפשר לפנות", #selector(selectRebuildable)),
                                           (smallButton, "Show small items", "הצג פריטים קטנים", #selector(toggleSmall))] {
             button.title = L(en, he); button.target = self; button.action = action; button.bezelStyle = .rounded; button.controlSize = .small; button.font = Type.caption; button.setAccessibilityLabel(L(en, he))
         }
@@ -182,7 +229,9 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         let spacer = NSView(); spacer.setContentHuggingPriority(.init(1), for: .horizontal)
         let toolbar = NSStackView(views: [measureButton, spacer, revealButton, actionButton, trashButton]); toolbar.spacing = 8; toolbar.alignment = .centerY
         copyButton.isHidden = true // folded into the row action ("Copy command & open Terminal")
-        let summaryButtons = NSStackView(views: [selectRebuildableButton, smallButton]); summaryButtons.spacing = 8
+        findButton.image = symbol("sparkle.magnifyingglass", 12); findButton.imagePosition = .imageLeading
+        findButton.toolTip = L("Looks through your whole home folder for build and cache folders, data of apps that are no longer installed, and large folders untouched for months. Reads names, sizes and dates only.", "עובר על כל תיקיית הבית ומחפש תיקיות בנייה ומטמון, נתונים של אפליקציות שכבר לא מותקנות ותיקיות גדולות שלא השתנו חודשים. קורא רק שמות, גדלים ותאריכים.")
+        let summaryButtons = NSStackView(views: [findButton, selectRebuildableButton, smallButton]); summaryButtons.spacing = 8
         let summaryCard = NSStackView(views: [summaryLabel, summaryButtons]); summaryCard.orientation = .vertical; summaryCard.alignment = .leading; summaryCard.spacing = 8
         summaryCard.edgeInsets = NSEdgeInsets(top: 12, left: 14, bottom: 12, right: 14); summaryCard.wantsLayer = true; summaryCard.layer?.cornerRadius = 10; summaryCard.layer?.backgroundColor = NSColor.quaternaryLabelColor.cgColor
         table.rowHeight = 30; table.intercellSpacing = NSSize(width: 12, height: 4); table.usesAlternatingRowBackgroundColors = false; table.style = .inset
@@ -242,7 +291,9 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
     /// Lists what exists on this Mac. Reads directory names only.
     func reload(keepMeasurements: Bool = false) {
         let old = Dictionary(rows.map { ($0.location.id, $0) }, uniquingKeysWith: { a, _ in a })
-        let locations = KnownLocations.present(in: home) + KnownLocations.cacheFolders(in: home)
+        if foundHome != home.standardizedFileURL.path { foundLocations = [] }
+        foundLocations = foundLocations.filter { FileManager.default.fileExists(atPath: $0.url(home: home).path) }
+        let locations = KnownLocations.present(in: home) + KnownLocations.cacheFolders(in: home) + foundLocations
         rows = locations.map { Row(location: $0, measurement: keepMeasurements ? old[$0.id]?.measurement : nil, moved: keepMeasurements ? (old[$0.id]?.moved ?? false) : false) }
         sortRows()
         updateDetail(); updateButtons(); onSelectionChange?()
@@ -277,6 +328,19 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         guard !indexes.isEmpty else { NSSound.beep(); return }
         table.selectRowIndexes(indexes, byExtendingSelection: false); window?.makeFirstResponder(table)
     }
+    @objc func findMore() { onFind?() }
+    /// Adds what the search found as rows, already measured by the search. Returns how many are new.
+    @discardableResult func addFindings(_ findings: [Finding]) -> Int {
+        var added = 0
+        if foundHome != home.standardizedFileURL.path { foundLocations = []; foundHome = home.standardizedFileURL.path }
+        for finding in findings {
+            guard let (location, text) = FoundLocations.location(for: finding, home: home), !rows.contains(where: { $0.location.id == location.id }) else { continue }
+            LocationTexts.found[location.id] = text; foundLocations.append(location)
+            rows.append(Row(location: location, measurement: LocationMeasurement(location: location, bytes: finding.bytes, files: finding.files))); added += 1
+        }
+        sortRows(); updateDetail(); updateButtons(); onSelectionChange?()
+        return added
+    }
     @objc func toggleSmall() { showSmall.toggle(); refreshVisible(); updateDetail(); updateButtons() }
     func setShowSmall(_ on: Bool) { showSmall = on; refreshVisible() }
     @objc func performRowAction() { guard selectedRows.count == 1, let row = selectedRow else { return }; let action = Self.action(for: row.location, home: home); if action != .none { onAction?(action) } }
@@ -297,7 +361,7 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
         guard let index = rows.firstIndex(where: { $0.location.id == location.id }) else { return }
         rows[index].moved = true; sortRows(); updateDetail(); updateButtons(); onSelectionChange?()
     }
-    func setEnabled(_ enabled: Bool) { table.isEnabled = enabled; if enabled { updateButtons(); updateSummary() } else { [measureButton, trashButton, revealButton, copyButton, actionButton, selectRebuildableButton].forEach { $0.isEnabled = false } } }
+    func setEnabled(_ enabled: Bool) { table.isEnabled = enabled; if enabled { updateButtons(); updateSummary() } else { [measureButton, trashButton, revealButton, copyButton, actionButton, selectRebuildableButton, findButton].forEach { $0.isEnabled = false } } }
     /// A folder came back from Trash: it is present again and needs measuring again.
     func restored(_ url: URL) {
         guard let index = rows.firstIndex(where: { $0.location.url(home: home).standardizedFileURL.path == url.standardizedFileURL.path }) else { return }
@@ -329,7 +393,7 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
             let v = NSTextField(labelWithString: text.next); v.font = Type.caption; v.textColor = .secondaryLabelColor; v.lineBreakMode = .byTruncatingTail; v.toolTip = text.next
             let cell = NSStackView(views: [v]); cell.alignment = .centerY; v.widthAnchor.constraint(equalTo: cell.widthAnchor).isActive = true; return cell
         default:
-            let name: String = { switch row.location.category { case KnownLocations.developer: return "hammer"; case KnownLocations.ai: return "brain"; case KnownLocations.browser: return "safari"; case KnownLocations.messaging: return "message"; case KnownLocations.backups: return "externaldrive.badge.timemachine"; case KnownLocations.installers: return "shippingbox"; case KnownLocations.system: return "gearshape"; default: return "app" } }()
+            let name: String = { switch row.location.category { case KnownLocations.developer: return "hammer"; case KnownLocations.ai: return "brain"; case KnownLocations.browser: return "safari"; case KnownLocations.messaging: return "message"; case KnownLocations.backups: return "externaldrive.badge.timemachine"; case KnownLocations.installers: return "shippingbox"; case KnownLocations.system: return "gearshape"; case FoundLocations.rebuild: return "arrow.triangle.2.circlepath"; case FoundLocations.leftover: return "questionmark.folder"; case FoundLocations.untouched: return "clock"; default: return "app" } }()
             let icon = NSImageView(image: symbol(name, 14) ?? NSImage()); icon.contentTintColor = row.moved ? .tertiaryLabelColor : .secondaryLabelColor; icon.setAccessibilityElement(false)
             icon.widthAnchor.constraint(equalToConstant: 18).isActive = true; icon.heightAnchor.constraint(equalToConstant: 18).isActive = true
             let v = NSTextField(labelWithString: text.title); v.font = Type.bodyMedium; v.lineBreakMode = .byTruncatingMiddle
@@ -365,6 +429,7 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
     private func updateButtons() {
         let row = selectedRow, many = selectedRows.count > 1, movable = selectedRows.filter(Self.movable)
         measureButton.isEnabled = !unmeasured.isEmpty
+        findButton.isEnabled = true
         revealButton.isEnabled = !many && row != nil && row?.moved == false; revealButton.isHidden = many
         trashButton.isHidden = movable.isEmpty && row?.location.safety != .rebuildable
         trashButton.isEnabled = !movable.isEmpty

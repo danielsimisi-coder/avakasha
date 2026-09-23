@@ -336,6 +336,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         freeUpPanel.onReveal={[weak self] url in self?.revealFolder(url)}
         freeUpPanel.onCopyCommand={[weak self] command in NSPasteboard.general.clearContents();NSPasteboard.general.setString(command,forType:.string);self?.status.stringValue=L("Command copied · paste it in Terminal","הפקודה הועתקה · מדביקים אותה ב־Terminal")}
         freeUpPanel.onSelectionChange={[weak self] in self?.updateEnabled()}
+        freeUpPanel.onFind={[weak self] in self?.findMore()}
         previewHost.addSubview(mapPanel.detail);mapPanel.detail.translatesAutoresizingMaskIntoConstraints=false;mapPanel.detail.isHidden=true
         NSLayoutConstraint.activate([mapPanel.detail.leadingAnchor.constraint(equalTo:previewHost.leadingAnchor,constant:20),mapPanel.detail.trailingAnchor.constraint(equalTo:previewHost.trailingAnchor,constant:-20),mapPanel.detail.topAnchor.constraint(equalTo:previewHost.topAnchor,constant:16)])
         let split=NSSplitView();split.isVertical=true;split.dividerStyle = .thin;split.addArrangedSubview(listHost);split.addArrangedSubview(previewHost)
@@ -411,6 +412,14 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
                 let dir=container.appendingPathComponent(path,isDirectory:true);try? FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
                 try? Data(repeating:0x2e,count:size).write(to:dir.appendingPathComponent("data.bin"))
             }
+            // Folders for "Find more": a project's packages, editing previews, an uninstalled app's data and an old project.
+            for (path,size,old) in [("Projects/Weather app/node_modules/react",1_600_000,false),("Movies/Wedding edit/Adobe Premiere Pro Audio Previews",900_000,false),
+                                    ("Library/Application Support/Old Editor/Library",1_100_000,false),("Documents/Old project 2019/Footage",2_000_000,true)] {
+                let dir=container.appendingPathComponent(path,isDirectory:true);try? FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
+                let file=dir.appendingPathComponent("data.bin");try? Data(repeating:0x2e,count:size).write(to:file)
+                if old { try? FileManager.default.setAttributes([.modificationDate:Date(timeIntervalSince1970:1561939200)],ofItemAtPath:file.path) }
+            }
+            try? Data("{}".utf8).write(to:container.appendingPathComponent("Projects/Weather app/package.json"))
             freeUpPanel.setShowSmall(true)
             for (index,name) in ["Coastal morning.png","Coastal morning — copy.png","Mountain light.png","Weekend palette.png"].enumerated() {
                 let image=NSImage(size:NSSize(width:1200,height:900));image.lockFocus()
@@ -436,7 +445,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             if let row=shown.firstIndex(where:{$0.name == featured}) {table.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false);previewOpen=true;updatePreview()}
             if ProcessInfo.processInfo.arguments.contains("--demo-overview") { setOverview(true) }
             if ProcessInfo.processInfo.arguments.contains("--demo-older") { showOlderFiles() }
-            if ProcessInfo.processInfo.arguments.contains("--demo-freeup") { showFreeUp() }
+            if ProcessInfo.processInfo.arguments.contains("--demo-freeup") || ProcessInfo.processInfo.arguments.contains("--demo-find") { showFreeUp() }
+            if ProcessInfo.processInfo.arguments.contains("--demo-find") { DispatchQueue.main.asyncAfter(deadline:.now()+1.5){ [weak self] in self?.findMore() } }
             mapPanel.showsPaths=false;pathLabel.isHidden=true
             if overviewMode && !ProcessInfo.processInfo.arguments.contains("--demo-overview") { setMapMode(false) } // the demo shows the file review unless asked for the overview
             (locationButtons+[chooseButton!]).forEach{ $0.isEnabled=false;$0.toolTip=L("Disabled in the read-only demo","מושבת בהדגמה לקריאה בלבד") }
@@ -497,7 +507,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         item(view,L("Older Files","קבצים ישנים"),#selector(showOlderFiles),"4");item(view,L("Installers & Archives","קבצי התקנה וארכיונים"),#selector(showInstallers),"5");view.addItem(.separator())
         item(view,L("Refresh","רענן"),#selector(rescanFolder),"r");item(view,L("Stop","עצור"),#selector(cancelWork),".");view.addItem(.separator())
         item(view,L("Find","חיפוש"),#selector(focusSearch),"f");item(view,L("Preview","תצוגה מקדימה"),#selector(togglePreview),"P",[.command,.shift]);item(view,L("Keep & Next","השאר והמשך"),#selector(nextFile),"K",[.command,.shift])
-        item(view,L("Find Duplicates","מצא כפילויות"),#selector(findExactDuplicates),"d");item(view,L("Compare Images","השווה תמונות"),#selector(findSimilarImages),"D",[.command,.shift]);item(view,L("Measure All","מדוד הכול"),#selector(measureAllCommand),"m")
+        item(view,L("Find Duplicates","מצא כפילויות"),#selector(findExactDuplicates),"d");item(view,L("Compare Images","השווה תמונות"),#selector(findSimilarImages),"D",[.command,.shift]);item(view,L("Measure All","מדוד הכול"),#selector(measureAllCommand),"m");item(view,L("Find More in Home Folder","חפש עוד בתיקיית הבית"),#selector(findMoreCommand),"M",[.command,.shift])
         let help=submenu(L("Help","עזרה"));item(help,L("Keyboard Shortcuts","קיצורי מקלדת"),#selector(showShortcuts),"/");NSApp.helpMenu=help
         let autoDownload=NSMenuItem(title:L("Stop WhatsApp auto-download…","עצירת הורדה אוטומטית ב־WhatsApp…"),action:#selector(openWhatsAppAutoDownload),keyEquivalent:"");autoDownload.target=self;menu.insertItem(autoDownload,at:1)
         menu.insertItem(.separator(),at:1)
@@ -514,6 +524,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     var reviewing: Bool { !overviewMode && !mapMode && !freeUpMode }
     @objc func focusSearch() { guard reviewing else { NSSound.beep();return };window.makeFirstResponder(search) }
     @objc func measureAllCommand() { guard !busy, freeUpMode else { return };freeUpPanel.measureAll() }
+    @objc func findMoreCommand() { guard !busy else { return };if !freeUpMode { setFreeUp(true) };if !busy { findMore() } }
     /// The same Show in Finder and Move to Trash commands the buttons offer, routed to whichever view is on screen; every guard stays in the callee.
     @objc func showInFinderCommand() { if mapMode { mapPanel.revealSelected() } else if freeUpMode { freeUpPanel.revealSelected() } else { revealFocusedFile() } }
     @objc func moveToTrashCommand() { if mapMode { mapPanel.trashTapped() } else if freeUpMode { freeUpPanel.trashSelected() } else { trashSelection() } }
@@ -566,6 +577,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         case #selector(nextFile): return !busy && reviewing && !shown.isEmpty
         case #selector(findExactDuplicates), #selector(findSimilarImages): return !busy && reviewing && !files.isEmpty
         case #selector(measureAllCommand): return !busy && freeUpMode && !freeUpPanel.unmeasured.isEmpty
+        case #selector(findMoreCommand): return !busy
         case #selector(showInFinderCommand): return !busy && (mapMode ? mapPanel.current != nil : (freeUpMode ? freeUpPanel.revealButton.isEnabled : focusedFile != nil))
         case #selector(moveToTrashCommand): return !busy && !demoMode && (mapMode ? mapPanel.trashableFolder != nil : (freeUpMode ? freeUpPanel.trashButton.isEnabled : (root != nil && !selectedFiles.isEmpty)))
         default: return true
@@ -574,7 +586,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     /// The standard About panel shows the bundle icon at its proper size; the version lives here, not in the title bar.
     @objc func aboutApp() {
         let credits=NSAttributedString(string:"© 2026 Daniel Siman Tov · daniel.simisi@gmail.com\n"+L("Local. Private. Yours. Nothing is deleted; files go to Trash and ⌘Z brings them back. MIT license. Not affiliated with WhatsApp or Meta.","מקומי. פרטי. שלך. שום דבר לא נמחק; קבצים עוברים לפח ו־⌘Z מחזיר אותם. רישיון MIT. ללא שיוך ל־WhatsApp או Meta."),attributes:[.font:Type.caption,.foregroundColor:NSColor.labelColor])
-        NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"Avakasha",.applicationVersion:"0.1.0 beta 11",.version:"",.credits:credits])
+        NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"Avakasha",.applicationVersion:"0.1.0 beta 12",.version:"",.credits:credits])
     }
     func show(_ title: String, _ detail: String) {
         if smokeMode { print("Alert suppressed in smoke mode: \(title) — \(detail)"); return }
@@ -696,6 +708,39 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             }
         }
     }
+    /// Looks through the whole home folder with the storage-map walker (names, sizes and dates only), then runs the detectors:
+    /// regenerable folders by name, data of apps that are not installed, large folders untouched for months. Nothing is moved here.
+    /// The smoke test's synthetic thresholds and app list, so it never reads the real Applications folders.
+    var findOverride:(options:FindingOptions,installed:[InstalledApp])?
+    func findMore() {
+        guard !busy, demoHomeIsSafe, let base=try? FileSafety.root(freeUpPanel.home) else { return }
+        let excluding=freeUpPanel.rows.filter{ !$0.location.id.hasPrefix("find.") }.map{ $0.location.url(home:base).path }
+        let demo=demoMode, override=findOverride
+        token=CancellationToken();let jobToken=token;setBusy(true);hideFeedback()
+        status.stringValue=L("Searching your home folder…","מחפשים בתיקיית הבית…")
+        work.async {
+            // Apps are looked up by their Info.plist only; the demo judges its generated folders against an empty list.
+            let installed = override?.installed ?? (demo ? [] : InstalledApps.scan(roots:InstalledApps.defaultRoots(home:base)))
+            var lastUpdate=Date.distantPast
+            let map=try? StorageMapper.map(root:base,token:jobToken,limit:0){entries,total in
+                guard Date().timeIntervalSince(lastUpdate)>0.2 else {return};lastUpdate=Date()
+                DispatchQueue.main.async{self.status.stringValue=L("Searching your home folder · ","מחפשים בתיקיית הבית · ")+"\(entries) "+L("items","פריטים")+" · "+bytes(total)}
+            }
+            var options=override?.options ?? FindingOptions()
+            if demo, override == nil { options.minimumRegenerableBytes=100_000;options.minimumLeftoverBytes=100_000;options.minimumUntouchedBytes=100_000 } // the demo's folders are small
+            let findings = map.flatMap{ $0.cancelled ? nil : Findings.detect(in:$0,installed:installed,options:options,excluding:excluding) }
+            DispatchQueue.main.async {
+                self.setBusy(false)
+                guard let findings else { self.status.stringValue = jobToken.isCancelled ? L("Search stopped · nothing added","החיפוש נעצר · לא נוסף דבר") : L("The home folder could not be searched","לא ניתן היה לחפש בתיקיית הבית");self.updateEnabled();return }
+                let added=self.freeUpPanel.addFindings(findings)
+                let rebuild=findings.filter(\.isRegenerable), review=findings.filter{ !$0.isRegenerable }
+                var text = added == 0 ? L("Nothing more found","לא נמצא דבר נוסף") : "\(added) "+L("more found","נוספים נמצאו")
+                if !rebuild.isEmpty { text += " · "+L("can go to Trash: ","אפשר להעביר לפח: ")+bytes(rebuild.reduce(0){$0+$1.bytes}) }
+                if !review.isEmpty { text += " · "+L("to review: ","לסקירה: ")+bytes(review.reduce(0){$0+$1.bytes}) }
+                self.status.stringValue=text;self.announce(text);self.updateEnabled();self.window.makeFirstResponder(self.freeUpPanel.table)
+            }
+        }
+    }
     /// Whole-folder move for a known, rebuildable location: same guarded flow as the map, with the home folder as the safety root.
     func trashLocation(_ location:KnownLocation,measured:LocationMeasurement,confirmed:Bool=false) {
         guard !busy, location.safety == .rebuildable, let base=try? FileSafety.root(freeUpPanel.home) else { return }
@@ -732,7 +777,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
                     if let override=self.folderConfirmationOverride { approved=override } else if self.smokeMode { approved=true }
                     else {
                         let a=NSAlert();a.alertStyle = .critical;a.messageText=L("Move \(fresh.count) folders to Trash?","להעביר \(fresh.count) תיקיות לפח?")
-                        var lines=fresh.map{ "• "+LocationTexts.text(for:$0.0).title+" · "+bytes($0.3) }
+                        var lines=fresh.map{ "• "+LocationTexts.text(for:$0.0).title+" · "+bytes($0.3)+($0.0.id.hasPrefix("find.") ? "\n   "+($0.1.path as NSString).abbreviatingWithTildeInPath : "") }
                         lines.append("");lines.append(L("Total: ","סך הכול: ")+bytes(totalBytes)+" · "+L("the owning apps rebuild this data. One ⌘Z brings everything back.","האפליקציות בונות את הנתונים האלה מחדש. ⌘Z אחד מחזיר הכול."))
                         if !(refused+skipped).isEmpty { lines.append("");lines.append(L("Not included: ","לא נכלל: "));lines.append(contentsOf:refused+skipped) }
                         a.informativeText=lines.joined(separator:"\n")
@@ -1844,6 +1889,25 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(freeUpPanel.rows.filter{$0.moved}.count == 2 && feedback.stringValue.hasPrefix("2 "),"Feedback names the folder count: \(feedback.stringValue)")
             undoTrash();settle()
             precondition(FileManager.default.fileExists(atPath:derivedURL.path) && FileManager.default.fileExists(atPath:appCache.path) && !activeHistory.canUndo,"One Undo brings every folder of the step back")
+            // Find more: the detectors over the synthetic home. A project's node_modules can go; a removed app's data is for review only.
+            let project=fakeHome.appendingPathComponent("Code/web",isDirectory:true),modules=project.appendingPathComponent("node_modules",isDirectory:true)
+            try FileManager.default.createDirectory(at:modules.appendingPathComponent("pkg"),withIntermediateDirectories:true);try Data(repeating:0x6e,count:30_000).write(to:modules.appendingPathComponent("pkg/index.js"));try Data("{}".utf8).write(to:project.appendingPathComponent("package.json"))
+            let gone=fakeHome.appendingPathComponent("Library/Application Support/GoneEditor",isDirectory:true)
+            try FileManager.default.createDirectory(at:gone,withIntermediateDirectories:true);try Data(repeating:0x67,count:30_000).write(to:gone.appendingPathComponent("library.db"))
+            var smallFind=FindingOptions();smallFind.minimumRegenerableBytes=10_000;smallFind.minimumLeftoverBytes=10_000;smallFind.minimumUntouchedBytes=10_000_000_000
+            findOverride=(smallFind,[InstalledApp(name:"Helper",bundleID:"com.example.helper")])
+            freeUpPanel.findMore();precondition(busy,"Find more starts a search");settle()
+            let foundIDs=Set(freeUpPanel.rows.filter{$0.location.id.hasPrefix("find.")}.map{$0.location.id})
+            precondition(foundIDs == ["find.Code/web/node_modules","find.Library/Application Support/GoneEditor"],"Found: \(foundIDs) · the catalogue's DerivedData is not listed twice")
+            let modulesRow=freeUpPanel.rows.first{$0.location.id == "find.Code/web/node_modules"}!,goneRow=freeUpPanel.rows.first{$0.location.id == "find.Library/Application Support/GoneEditor"}!
+            precondition(modulesRow.location.safety == .rebuildable && FreeUpPanel.movable(modulesRow) && goneRow.location.safety == .keepOrReview && !FreeUpPanel.movable(goneRow),"Only regenerable findings can go to Trash")
+            precondition(FreeUpPanel.action(for:goneRow.location,home:fakeHome) == .reviewFiles(goneRow.location.url(home:fakeHome)) && LocationTexts.text(for:goneRow.location).title.contains("GoneEditor"))
+            freeUpPanel.findMore();settle();precondition(freeUpPanel.rows.filter{$0.location.id.hasPrefix("find.")}.count == 2,"Searching again adds nothing twice")
+            trashLocation(goneRow.location,measured:goneRow.measurement!,confirmed:true);precondition(FileManager.default.fileExists(atPath:gone.path),"A leftover is never moved by the app")
+            trashLocation(modulesRow.location,measured:modulesRow.measurement!,confirmed:true);settle()
+            precondition(!FileManager.default.fileExists(atPath:modules.path) && FileManager.default.fileExists(atPath:project.appendingPathComponent("package.json").path),"node_modules moved, the project stays")
+            undoTrash();settle();precondition(FileManager.default.fileExists(atPath:modules.appendingPathComponent("pkg/index.js").path),"Undo brings node_modules back")
+            findOverride=nil
             setFreeUp(false);freeUpPanel.setShowSmall(false);home=FileManager.default.homeDirectoryForCurrentUser;freeUpPanel.home=home;try FileManager.default.removeItem(at:fakeHome)
             let savedRoot=root!;activateRoot(temp.appendingPathComponent("other"));precondition(!history.canUndo && !history.canRedo);activateRoot(savedRoot);precondition(history.canRedo)
             toggleTrashConfirmation(confirmationMenuItem!);precondition(!preferences.bool(forKey:"skipTrashConfirmation"))
@@ -1853,7 +1917,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(preferences.bool(forKey:"AppleTextDirection"),"Hebrew must switch the layout direction")
             chooseLanguage(languageItems[0]);precondition(preferences.stringArray(forKey:"AppleLanguages") == ["en"] && !preferences.bool(forKey:"AppleTextDirection"))
             precondition(isCurrentRoot(root!) && !isCurrentRoot(temp.appendingPathComponent("map")),"Clicking the loaded location again must not rescan")
-            print("UI smoke: storage map, largest files, installers, reviewed marks, session space summary, selection, old-file sorting, preview, confirmation preference, Delete, Undo, Redo, blocked-restore retry and held-key protection passed. No real files changed; no windows shown.")
+            print("UI smoke: storage map, largest files, installers, reviewed marks, session space summary, free-up search, selection, old-file sorting, preview, confirmation preference, Delete, Undo, Redo, blocked-restore retry and held-key protection passed. No real files changed; no windows shown.")
             cleanup();fflush(stdout);exit(0)
         } catch { fputs("UI smoke failed: \(error)\n",stderr);cleanup();exit(1) }
     }
