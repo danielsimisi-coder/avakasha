@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.0-beta.13
+
+- **What can go** on the overview: once Free up space has measured, the overview says how much can go to Trash now and how much needs an app, Terminal or a review, and lists the five most worthwhile steps, ranked by size weighted by how safe and direct each step is. A folder that holds other listed rows (all app caches) gives way to them. Clicking a step opens Free up space on that row. Before anything is measured it offers "Check what can go" and measures nothing by itself.
+- Find more reuses a complete, recent map of the home folder (under 30 minutes old and unchanged by moves) instead of walking again, and when no map is loaded its walk becomes the storage map, so "Map home folder" right after a search is instant. Rescan always measures again.
+- The storage map notes "Rebuilt by its app" for folders whose name marks regenerated data (the same rules as Find more), "No changes for …" for folders where nothing changed for six months or more, and shows the last change inside each folder in the details.
+- Trash: the overview shows what this session moved and, when Free up space could measure it, what is in Trash, with an Open Trash button and the reminder that space is freed only when Trash is emptied. The bottom line and the "moved to Trash" note say the same. The Trash's size is measured again after every move or restore.
+- Fix: moving a folder from Free up space now marks the storage map as out of date, as file moves already did.
+
 ## 0.1.0-beta.12
 
 - **Find more in your home folder** (Free up space, or ⇧⌘M) looks through the whole home folder with the storage-map walker (names, sizes and dates only) and adds what it finds to the list, each with its size and verdict:

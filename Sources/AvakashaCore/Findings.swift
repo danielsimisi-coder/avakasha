@@ -123,6 +123,22 @@ public enum Findings {
         return isAdobeRender(lower) ? "adobe render" : nil
     }
 
+    /// The storage map's hint for one folder: the regenerable pattern its name matches, with the search's rules
+    /// (generic cache names only inside Library, node_modules only beside a package.json and outside Library). A hint, not a verdict.
+    public static func regenerableHint(for node: StorageNode) -> String? {
+        guard !node.isPackage, !node.isUnreadable else { return nil }
+        let inLibrary = node.url.path.contains("/Library/")
+        guard let pattern = regenerablePattern(for: node.name, inLibrary: inLibrary) else { return nil }
+        if pattern == "node_modules", !FileManager.default.fileExists(atPath: node.url.deletingLastPathComponent().appendingPathComponent("package.json").path) { return nil }
+        return pattern
+    }
+    /// Whole months since anything inside the folder last changed, or nil when that is under `minimum` months or unknown.
+    public static func monthsUnchanged(_ node: StorageNode, now: Date = Date(), minimum: Int = 6) -> Int? {
+        guard node.newestModified > 0 else { return nil }
+        let months = Calendar.current.dateComponents([.month], from: Date(timeIntervalSince1970: TimeInterval(node.newestModified)), to: now).month ?? 0
+        return months >= minimum ? months : nil
+    }
+
     /// Where data of removed apps usually stays, relative to the home folder.
     public static let leftoverParents = ["Library/Application Support", "Library/Containers", "Library/Group Containers", "Library/Caches", "Documents/Adobe"]
     /// Never looked into: cloud-synced folders (removing them removes them everywhere), Trash, and Apple's own data.

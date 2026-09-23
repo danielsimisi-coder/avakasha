@@ -112,6 +112,8 @@ enum RowAction: Equatable {
 /// Folders the search found, turned into rows: an id, a place in the list, a safety verdict and the words that explain it.
 enum FoundLocations {
     static let rebuild = "found.rebuild", leftover = "found.leftover", untouched = "found.untouched"
+    /// "8 months", or "3 years" from two years on.
+    static func span(_ months: Int) -> String { months >= 24 ? L("\(months / 12) years", "\(months / 12) שנים") : L("\(months) months", "\(months) חודשים") }
     static func location(for finding: Finding, home: URL) -> (KnownLocation, LocationText)? {
         let base = home.standardizedFileURL.resolvingSymlinksInPath().path, path = finding.url.standardizedFileURL.path
         guard path.hasPrefix(base + "/") else { return nil }
@@ -136,7 +138,7 @@ enum FoundLocations {
                                  next: L("If you install it again, its settings and data will be gone.", "אם מתקינים אותה שוב, ההגדרות והנתונים שלה לא יהיו."),
                                  howTo: L("It may belong to a command-line tool or a plugin. Review the files, or show the folder in Finder and decide there.", "ייתכן שהיא שייכת לכלי שורת פקודה או לתוסף. סוקרים את הקבצים, או מציגים את התיקייה ב־Finder ומחליטים שם.")))
         case .untouched(let months):
-            let span = months >= 24 ? L("\(months / 12) years", "\(months / 12) שנים") : L("\(months) months", "\(months) חודשים")
+            let span = span(months)
             return (KnownLocation(id: id, relativePath: relative, category: untouched, safety: .keepOrReview),
                     LocationText(title: name,
                                  what: L("Nothing inside changed in ", "שום דבר בפנים לא השתנה כבר ") + span + ".",
@@ -287,6 +289,44 @@ final class FreeUpPanel: NSView, NSTableViewDataSource, NSTableViewDelegate {
     }
     var rebuildableTotal: Int64 { rows.filter { $0.location.safety == .rebuildable && !$0.moved }.reduce(0) { $0 + ($1.measurement?.bytes ?? 0) } }
     var unmeasured: [KnownLocation] { rows.filter { $0.measurement == nil && !$0.moved }.map(\.location) }
+    var hasMeasurements: Bool { rows.contains { $0.measurement != nil } }
+    /// What can go to Trash now, and what needs the owning app, Terminal or a review; nested rows are counted once.
+    var movableTotal: Int64 { total(Self.movable) }
+    var otherTotal: Int64 { total { !Self.movable($0) && $0.location.safety != .restartClears && $0.measurement?.error == nil } }
+    /// How much a step is worth: its size weighted by how safe and direct it is (Trash now, then the owning app or Terminal, then review).
+    static func weight(_ row: Row) -> Double {
+        switch row.location.safety {
+        case .rebuildable: return 1
+        case .cleanInsideApp, .commandOnly: return 0.6
+        case .keepOrReview: return row.location.category == FoundLocations.untouched ? 0.3 : 0.4
+        case .restartClears: return 0
+        }
+    }
+    /// The most worthwhile measured steps, best first. A row that holds other listed rows (all app caches) gives way to them.
+    func topSteps(_ limit: Int = 5) -> [Row] {
+        let candidates = rows.filter { r in
+            !r.moved && (r.measurement.map { $0.error == nil && $0.bytes > 0 } ?? false) && Self.weight(r) > 0
+                && !rows.contains { o in o.location.id != r.location.id && o.location.relativePath.hasPrefix(r.location.relativePath + "/") }
+        }
+        return Array(candidates.sorted { a, b in
+            let sa = Double(a.measurement!.bytes) * Self.weight(a), sb = Double(b.measurement!.bytes) * Self.weight(b)
+            return sa == sb ? a.location.id < b.location.id : sa > sb
+        }.prefix(limit))
+    }
+    /// The Trash's size as last measured here, or nil when not measured or not readable.
+    var trashBytes: Int64? { rows.first { $0.location.id == "trash" }?.measurement.flatMap { $0.error == nil ? $0.bytes : nil } }
+    /// Forgets a measurement that is out of date (the Trash after a move), so it is measured again next time.
+    func invalidate(_ id: String) {
+        guard let index = rows.firstIndex(where: { $0.location.id == id }), rows[index].measurement != nil else { return }
+        rows[index].measurement = nil; sortRows(); updateDetail(); updateButtons()
+    }
+    /// Selects one row, showing small items if needed, and focuses the list.
+    func select(id: String) {
+        guard let row = rows.first(where: { $0.location.id == id }) else { return }
+        if !visible.contains(where: { $0.location.id == id }), let bytes = row.measurement?.bytes, bytes < minimumVisibleBytes { setShowSmall(true) }
+        guard let index = visible.firstIndex(where: { $0.location.id == id }) else { return }
+        table.selectRowIndexes(IndexSet(integer: index), byExtendingSelection: false); table.scrollRowToVisible(index); window?.makeFirstResponder(table)
+    }
 
     /// Lists what exists on this Mac. Reads directory names only.
     func reload(keepMeasurements: Bool = false) {

@@ -269,6 +269,8 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
         if node.isUnreadable { parts.append(L("Not accessible", "לא נגיש")) }
         else { parts.append("\(node.files) " + L("files", "קבצים") + (node.directories > 0 ? " · \(node.directories) " + L("folders", "תיקיות") : "")) }
         if node.isPackage { parts.append(L("Bundle", "חבילה")) }
+        if Findings.regenerableHint(for: node) != nil { parts.append(L("Rebuilt by its app", "נבנה מחדש")) }
+        if !node.isUnreadable, let months = Findings.monthsUnchanged(node) { parts.append(L("No changes for ", "ללא שינוי ") + FoundLocations.span(months)) }
         let chatLabel: String? = { switch ChatFolders.kind(of: node.url.appendingPathComponent("x")) { case .group?: return L("Group chat", "קבוצה"); case .personal?: return L("Personal chat", "שיחה אישית"); case .broadcast?: return L("Status / broadcast", "סטטוס / תפוצה"); case nil: return nil } }()
         if let label = chatLabel { parts.append(chatNames[node.name.lowercased()].map { label + ": " + $0.name } ?? label) }
         if node.isHidden { parts.append(L("Hidden", "מוסתר")) }
@@ -295,12 +297,16 @@ final class StorageMapPanel: NSView, NSTableViewDataSource, NSTableViewDelegate 
             let shown = row?.bytes ?? current.bytes
             facts.append(String(format: L("%.1f%% of ", "%.1f%% מתוך ") + root.name, Double(shown) / Double(root.bytes) * 100))
         }
+        if !node.isUnreadable, row?.node != nil || row == nil, node.newestModified > 0 {
+            facts.append(L("Last change inside: ", "שינוי אחרון בפנים: ") + DateFormatter.localizedString(from: Date(timeIntervalSince1970: TimeInterval(node.newestModified)), dateStyle: .medium, timeStyle: .none))
+        }
         detailFacts.stringValue = facts.joined(separator: "\n")
         let largest = largestFiles(in: node, directOnly: row != nil && row?.node == nil)
         detailLargest.stringValue = largest.map { $0.url.lastPathComponent + " · " + bytes($0.bytes) }.joined(separator: "\n"); detailLargest.isHidden = largest.isEmpty
         var notes: [String] = []
         if node.isUnreadable { notes.append(L("This folder could not be read. Grant access in System Settings › Privacy & Security, or leave it.", "לא ניתן לקרוא את התיקייה. אפשר לתת גישה ב־System Settings › Privacy & Security או להשאיר אותה.")) }
         if node.isPackage { notes.append(L("A bundle such as an app or a library. Its contents are measured but not reviewed file by file.", "חבילה כמו אפליקציה או ספרייה. התוכן נמדד אך לא נסקר קובץ־קובץ.")) }
+        if row?.node != nil || row == nil, Findings.regenerableHint(for: node) != nil { notes.append(L("The name marks data an app or tool rebuilds. Free up space › Find more lists such folders with what you lose if they go.", "השם מסמן נתונים שאפליקציה או כלי בונים מחדש. פינוי מקום › חפש עוד מציג תיקיות כאלה ומה מפסידים אם הן הולכות.")) }
         if node.isHidden { notes.append(L("Hidden folder. System and app data often live here; review with care.", "תיקייה מוסתרת. לרוב מכילה נתוני מערכת ואפליקציות; יש לסקור בזהירות.")) }
         if !node.isUnreadable && node.inaccessible > 0 { notes.append("\(node.inaccessible) " + L("items could not be read and are not counted.", "פריטים לא נקראו ואינם נספרים.")) }
         if node.notDownloaded > 0 { notes.append("\(node.notDownloaded) " + L("cloud items are not downloaded and take no local space.", "פריטי ענן לא הורדו ואינם תופסים מקום מקומי.")) }

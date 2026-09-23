@@ -176,6 +176,17 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     var mapButton: NSButton!
     /// True once files were moved or restored after the current map was measured.
     var mapStale = false
+    /// When the loaded map was measured; a map of the home folder younger than `mapReuseSeconds` is reused instead of walking again.
+    var mapMeasuredAt:Date?
+    let mapReuseSeconds:TimeInterval = 1800
+    /// Whether the last "Find more" used the loaded map rather than walking the home folder (for the smoke test and the status line).
+    var lastFindUsedMap = false
+    /// The loaded map, when it covers `folder`, is complete, unchanged by moves and recent.
+    func recentMap(of folder:URL) -> StorageMapResult? {
+        guard let r=mapPanel.result, !r.cancelled, !mapStale, let at=mapMeasuredAt, Date().timeIntervalSince(at) < mapReuseSeconds,
+              let target=try? FileSafety.root(folder), r.root.url.standardizedFileURL.path == target.standardizedFileURL.path else { return nil }
+        return r
+    }
     let continueLink = PathLink()
     var rescanButton: NSButton!
     var cancellable = false // true while a scan, map or analysis can be stopped with partial results
@@ -319,7 +330,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         mapPanel.onLargest={[weak self] in self?.reviewLargestFiles()}
         overviewPanel.translatesAutoresizingMaskIntoConstraints=false;listHost.addSubview(overviewPanel,positioned:.below,relativeTo:emptyList);overviewPanel.isHidden=true
         NSLayoutConstraint.activate([overviewPanel.leadingAnchor.constraint(equalTo:listHost.leadingAnchor),overviewPanel.trailingAnchor.constraint(equalTo:listHost.trailingAnchor),overviewPanel.topAnchor.constraint(equalTo:listHost.topAnchor),overviewPanel.bottomAnchor.constraint(equalTo:listHost.bottomAnchor)])
-        overviewPanel.onMapHome={[weak self] in if let h=self?.home { self?.startMap(h) }}
+        overviewPanel.onMapHome={[weak self] in if let h=self?.home { self?.startMap(h,reuseRecent:true) }}
+        overviewPanel.onStep={[weak self] id in guard let self=self, !self.busy else { return };self.setFreeUp(true);self.freeUpPanel.select(id:id)}
+        overviewPanel.onOpenTrash={[weak self] in if self?.smokeMode == false { self?.openTrash() }}
         overviewPanel.onMapDrive={[weak self] in self?.chooseMapFolder()}
         overviewPanel.onFreeUp={[weak self] in self?.showFreeUp()}
         overviewPanel.onContinue={[weak self] in self?.resumeFolder()}
@@ -445,8 +458,10 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             if let row=shown.firstIndex(where:{$0.name == featured}) {table.selectRowIndexes(IndexSet(integer:row),byExtendingSelection:false);previewOpen=true;updatePreview()}
             if ProcessInfo.processInfo.arguments.contains("--demo-overview") { setOverview(true) }
             if ProcessInfo.processInfo.arguments.contains("--demo-older") { showOlderFiles() }
-            if ProcessInfo.processInfo.arguments.contains("--demo-freeup") || ProcessInfo.processInfo.arguments.contains("--demo-find") { showFreeUp() }
-            if ProcessInfo.processInfo.arguments.contains("--demo-find") { DispatchQueue.main.asyncAfter(deadline:.now()+1.5){ [weak self] in self?.findMore() } }
+            if ["--demo-freeup","--demo-find","--demo-steps"].contains(where:ProcessInfo.processInfo.arguments.contains) { showFreeUp() }
+            if ProcessInfo.processInfo.arguments.contains("--demo-find") || ProcessInfo.processInfo.arguments.contains("--demo-steps") { DispatchQueue.main.asyncAfter(deadline:.now()+1.5){ [weak self] in self?.findMore() } }
+            if ProcessInfo.processInfo.arguments.contains("--demo-steps") { DispatchQueue.main.asyncAfter(deadline:.now()+3.5){ [weak self] in self?.showOverview() } }
+            if ProcessInfo.processInfo.arguments.contains("--demo-homemap") { DispatchQueue.main.asyncAfter(deadline:.now()+5){ [weak self] in guard let self=self else { return };self.startMap(self.home,reuseRecent:true) } }
             mapPanel.showsPaths=false;pathLabel.isHidden=true
             if overviewMode && !ProcessInfo.processInfo.arguments.contains("--demo-overview") { setMapMode(false) } // the demo shows the file review unless asked for the overview
             (locationButtons+[chooseButton!]).forEach{ $0.isEnabled=false;$0.toolTip=L("Disabled in the read-only demo","מושבת בהדגמה לקריאה בלבד") }
@@ -586,7 +601,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     /// The standard About panel shows the bundle icon at its proper size; the version lives here, not in the title bar.
     @objc func aboutApp() {
         let credits=NSAttributedString(string:"© 2026 Daniel Siman Tov · daniel.simisi@gmail.com\n"+L("Local. Private. Yours. Nothing is deleted; files go to Trash and ⌘Z brings them back. MIT license. Not affiliated with WhatsApp or Meta.","מקומי. פרטי. שלך. שום דבר לא נמחק; קבצים עוברים לפח ו־⌘Z מחזיר אותם. רישיון MIT. ללא שיוך ל־WhatsApp או Meta."),attributes:[.font:Type.caption,.foregroundColor:NSColor.labelColor])
-        NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"Avakasha",.applicationVersion:"0.1.0 beta 12",.version:"",.credits:credits])
+        NSApp.orderFrontStandardAboutPanel(options:[.applicationName:"Avakasha",.applicationVersion:"0.1.0 beta 13",.version:"",.credits:credits])
     }
     func show(_ title: String, _ detail: String) {
         if smokeMode { print("Alert suppressed in smoke mode: \(title) — \(detail)"); return }
@@ -659,7 +674,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     /// One calm line next to the content after a move or a restore, announced to VoiceOver, gone after 8 s or on the next scan or mode change.
     func showFeedback(_ text:String,undoable:Bool) {
-        feedback.stringValue=text;feedbackUndo.isHidden = !undoable || demoMode;feedbackRow.isHidden=false;announce(text)
+        feedback.stringValue=text;feedbackUndo.isHidden = !undoable || demoMode;feedbackRow.isHidden=false
+        feedback.toolTip = undoable ? L("The space is freed when you empty Trash in Finder.","המקום מתפנה כשמרוקנים את הפח ב־Finder.") : nil
+        announce(undoable ? text+". "+L("The space is freed when you empty Trash.","המקום מתפנה כשמרוקנים את הפח.") : text)
         feedbackTimer?.cancel();let hide=DispatchWorkItem{ [weak self] in self?.feedbackRow.isHidden=true };feedbackTimer=hide
         DispatchQueue.main.asyncAfter(deadline:.now()+8,execute:hide)
     }
@@ -716,16 +733,18 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         guard !busy, demoHomeIsSafe, let base=try? FileSafety.root(freeUpPanel.home) else { return }
         let excluding=freeUpPanel.rows.filter{ !$0.location.id.hasPrefix("find.") }.map{ $0.location.url(home:base).path }
         let demo=demoMode, override=findOverride
+        let reusable=recentMap(of:base);lastFindUsedMap = reusable != nil
         token=CancellationToken();let jobToken=token;setBusy(true);hideFeedback()
-        status.stringValue=L("Searching your home folder…","מחפשים בתיקיית הבית…")
+        status.stringValue = reusable != nil ? L("Using the storage map of your home folder…","משתמשים במפת האחסון של תיקיית הבית…") : L("Searching your home folder…","מחפשים בתיקיית הבית…")
         work.async {
             // Apps are looked up by their Info.plist only; the demo judges its generated folders against an empty list.
             let installed = override?.installed ?? (demo ? [] : InstalledApps.scan(roots:InstalledApps.defaultRoots(home:base)))
             var lastUpdate=Date.distantPast
-            let map=try? StorageMapper.map(root:base,token:jobToken,limit:0){entries,total in
+            // A full map (with its largest files), so it can also fill the storage map when none is loaded.
+            let map=reusable ?? (try? StorageMapper.map(root:base,token:jobToken){entries,total in
                 guard Date().timeIntervalSince(lastUpdate)>0.2 else {return};lastUpdate=Date()
                 DispatchQueue.main.async{self.status.stringValue=L("Searching your home folder · ","מחפשים בתיקיית הבית · ")+"\(entries) "+L("items","פריטים")+" · "+bytes(total)}
-            }
+            })
             var options=override?.options ?? FindingOptions()
             if demo, override == nil { options.minimumRegenerableBytes=100_000;options.minimumLeftoverBytes=100_000;options.minimumUntouchedBytes=100_000 } // the demo's folders are small
             let findings = map.flatMap{ $0.cancelled ? nil : Findings.detect(in:$0,installed:installed,options:options,excluding:excluding) }
@@ -733,6 +752,8 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
                 self.setBusy(false)
                 guard let findings else { self.status.stringValue = jobToken.isCancelled ? L("Search stopped · nothing added","החיפוש נעצר · לא נוסף דבר") : L("The home folder could not be searched","לא ניתן היה לחפש בתיקיית הבית");self.updateEnabled();return }
                 let added=self.freeUpPanel.addFindings(findings)
+                // The walk measured the whole home folder: when no map is loaded, it becomes the storage map, so mapping home is instant.
+                if reusable == nil, self.mapPanel.result == nil, let map=map, !map.cancelled { self.mapRoot=base;self.mapPanel.load(map);self.mapStale=false;self.mapPanel.setStale(false);self.mapMeasuredAt=Date() }
                 let rebuild=findings.filter(\.isRegenerable), review=findings.filter{ !$0.isRegenerable }
                 var text = added == 0 ? L("Nothing more found","לא נמצא דבר נוסף") : "\(added) "+L("more found","נוספים נמצאו")
                 if !rebuild.isEmpty { text += " · "+L("can go to Trash: ","אפשר להעביר לפח: ")+bytes(rebuild.reduce(0){$0+$1.bytes}) }
@@ -797,7 +818,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
                             if result.ticket != nil { self.freeUpPanel.markMoved(fresh[index].0);moved+=fresh[index].3;count+=1 }
                             else if let f=result.failure { failures.append(LocationTexts.text(for:fresh[index].0).title+": "+f.message) }
                         }
-                        if count>0 { let text="\(count) "+L("folders moved to Trash","תיקיות הועברו לפח")+" · "+bytes(moved);self.status.stringValue=text+" · "+L("Undo with ⌘Z","ביטול עם ⌘Z");self.showFeedback(text,undoable:true);self.updateSpaceLabel();self.updateEnabled() }
+                        if count>0 { self.spaceChanged();let text="\(count) "+L("folders moved to Trash","תיקיות הועברו לפח")+" · "+bytes(moved);self.status.stringValue=text+" · "+L("Undo with ⌘Z","ביטול עם ⌘Z");self.showFeedback(text,undoable:true);self.updateSpaceLabel();self.updateEnabled() }
                         if !failures.isEmpty { self.show(L("Some folders were not moved","חלק מהתיקיות לא הועברו"),failures.joined(separator:"\n")) }
                     }
                 }
@@ -881,7 +902,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
                     let result=acting.moveFolder(folder,root:root,expected:expected,bytes:fresh.root.bytes,allowHiddenAncestors:fromCatalogue,backend:self.trashBackend)
                     DispatchQueue.main.async {
                         self.setBusy(false)
-                        if result.ticket != nil { onMoved();self.status.stringValue=title+" · "+L("moved to Trash · Undo with ⌘Z","הועבר לפח · ביטול עם ⌘Z")+" · "+bytes(fresh.root.bytes);self.updateSpaceLabel();self.updateEnabled();self.showFeedback(title+" · "+L("moved to Trash","הועבר לפח")+" · "+bytes(fresh.root.bytes),undoable:true) }
+                        if result.ticket != nil { onMoved();self.spaceChanged();self.status.stringValue=title+" · "+L("moved to Trash · Undo with ⌘Z","הועבר לפח · ביטול עם ⌘Z")+" · "+bytes(fresh.root.bytes);self.updateSpaceLabel();self.updateEnabled();self.showFeedback(title+" · "+L("moved to Trash","הועבר לפח")+" · "+bytes(fresh.root.bytes),undoable:true) }
                         else if let failure=result.failure { self.show(L("Not moved","לא הועבר"),failure.message) }
                     }
                 }
@@ -898,7 +919,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             headingLabel.stringValue=L("Make room on your Mac","לפנות מקום ב־Mac");setFolderLabel(L("See what fills each drive, then decide what goes to Trash. Nothing is deleted, nothing leaves this Mac, and ⌘Z brings files back.","רואים מה ממלא כל כונן ומחליטים מה עובר לפח. שום דבר לא נמחק, שום דבר לא יוצא מה־Mac, ו־⌘Z מחזיר קבצים."),path:false);hideFeedback()
             mapButton.title=L("Storage map","מפת אחסון");mapButton.image=NSImage(systemSymbolName:"chart.pie",accessibilityDescription:nil)
             primary.previewItem=nil;comparison.previewItem=nil;stopVideo()
-            overviewPanel.update(sessionMoved:totalMovedBytes);overviewPanel.setContinue(demoMode ? nil : preferences.string(forKey:"lastFolder").map{ displayPath(URL(fileURLWithPath:$0)) })
+            refreshOverview();overviewPanel.setContinue(demoMode ? nil : preferences.string(forKey:"lastFolder").map{ displayPath(URL(fileURLWithPath:$0)) })
             updateEnabled();updateLocationHighlight();window.makeFirstResponder(overviewPanel.mapHomeButton)
         } else {
             overviewPanel.isHidden=true;previewHostView.isHidden=false
@@ -992,11 +1013,19 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     /// Two honest numbers side by side: what was moved (still in Trash) and what the volume reports free. Never a prediction.
     func updateSpaceLabel() {
         guard let anchor = freeUpMode ? freeUpPanel.home : (root ?? mapRoot) else { spaceLabel.isHidden=true;return }
-        var text = totalMovedBytes > 0 ? L("Moved to Trash this session: ","הועבר לפח בהפעלה זו: ")+bytes(totalMovedBytes) : L("Nothing moved to Trash yet","עדיין לא הועבר דבר לפח")
+        var text = totalMovedBytes > 0 ? L("Moved to Trash this session: ","הועבר לפח בהפעלה זו: ")+bytes(totalMovedBytes)+" "+L("(freed when Trash is emptied)","(יתפנה כשמרוקנים את הפח)") : L("Nothing moved to Trash yet","עדיין לא הועבר דבר לפח")
         if let free=DiskSpace.available(at:anchor) { text += " · "+L("Free on this drive: ","פנוי בכונן הזה: ")+bytes(free) }
         spaceLabel.stringValue=text;spaceLabel.isHidden=false
-        if overviewMode { overviewPanel.update(sessionMoved:totalMovedBytes) }
+        if overviewMode { refreshOverview() }
     }
+    /// The overview's numbers: drives, what Free up space measured (never measured from here), the Trash.
+    func refreshOverview() {
+        overviewPanel.update(sessionMoved:totalMovedBytes,trash:freeUpPanel.trashBytes)
+        let steps=freeUpPanel.topSteps().map{ OverviewStep(id:$0.location.id,title:LocationTexts.text(for:$0.location).title,bytes:$0.measurement?.bytes ?? 0,safety:$0.location.safety) }
+        overviewPanel.setSteps(measured:freeUpPanel.hasMeasurements,canGo:freeUpPanel.movableTotal,other:freeUpPanel.otherTotal,steps:steps)
+    }
+    /// Something moved to Trash or came back: the map no longer adds up and the Trash's measured size is out of date.
+    func spaceChanged() { markMapStale();freeUpPanel.invalidate("trash") }
     /// The read-only demo may only ever read inside its generated container.
     func demoAllows(_ url:URL) -> Bool { guard demoMode else { return true };guard let demo=demoFolder else { return false };return url.standardizedFileURL.resolvingSymlinksInPath().path.hasPrefix(demo.standardizedFileURL.resolvingSymlinksInPath().path) }
     func startScan(_ url: URL) {
@@ -1072,8 +1101,15 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         if mapPanel.result != nil, mapPanel.reveal(folder:current) { mapRoot=mapPanel.result?.root.url;setMapMode(true);window.makeFirstResponder(mapPanel.table);return }
         startMap(current)
     }
-    func startMap(_ url:URL) {
+    func startMap(_ url:URL,reuseRecent:Bool=false) {
         guard !busy, demoAllows(url) else { return }
+        // "Map home folder" right after a search (or an earlier map) shows the recent map instead of walking again; Rescan always measures.
+        if reuseRecent, let recent=recentMap(of:url), let target=mapRoot {
+            if overviewMode { setOverview(false) };mapPanel.load(recent);setMapMode(true);if !demoMode { setFolderLabel(target.path,path:true) };updateLocationHighlight();hideFeedback();refreshEmptyState();updateSpaceLabel()
+            let minutes=Int(Date().timeIntervalSince(mapMeasuredAt ?? Date())/60)
+            status.stringValue=mapSummary(recent)+" · "+L("measured \(minutes) min ago · Rescan from the toolbar","נמדד לפני \(minutes) דק׳ · מדידה מחדש מסרגל הכלים")
+            mapPanel.rescanButton.isHidden=false;window.makeFirstResponder(mapPanel.table);return
+        }
         let target:URL
         do { target=try FileSafety.root(url) } catch {
             let detail = url.standardizedFileURL.path == "/" ? L("The whole startup disk cannot be mapped. Choose your home folder, a folder inside it, or an external drive.","אי אפשר למפות את כל דיסק ההפעלה. אפשר לבחור את תיקיית הבית, תיקייה בתוכה או כונן חיצוני.") : error.localizedDescription
@@ -1090,7 +1126,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
                     DispatchQueue.main.async{self.status.stringValue=L("Measured so far: ","נמדדו עד כה: ")+"\(entries) "+L("items","פריטים")+" · "+bytes(total)}
                 }
                 DispatchQueue.main.async {
-                    self.setBusy(false);self.mapStale=false;self.mapPanel.load(result);self.mapPanel.setStale(false);self.refreshEmptyState();self.updateSpaceLabel()
+                    self.setBusy(false);self.mapStale=false;self.mapMeasuredAt=result.cancelled ? nil : Date();self.mapPanel.load(result);self.mapPanel.setStale(false);self.refreshEmptyState();self.updateSpaceLabel()
                     self.status.stringValue=self.mapSummary(result);self.window.makeFirstResponder(self.mapPanel.table)
                     if self.pendingLargestReview { self.pendingLargestReview=false;self.reviewLargestFiles() }
                 }
@@ -1515,7 +1551,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     /// After files move or come back, the last map no longer adds up; say so instead of showing stale totals as current.
     func markMapStale() { guard mapPanel.result != nil else { return };mapStale=true;mapPanel.setStale(true) }
     func finishMove(_ result:MoveResult,nextRow:Int) {
-        if !result.tickets.isEmpty { markMapStale() }
+        if !result.tickets.isEmpty { spaceChanged() }
         let moved=Set(result.tickets.map{$0.original.path});let movedBytes=files.filter{ moved.contains($0.id) }.reduce(0){$0+$1.allocatedBytes};files.removeAll{moved.contains($0.id)}
         if !moved.isDisjoint(with:starred) { starred.subtract(moved);persistStars() }
         reviewed.forget(paths:moved) // a file in Trash is not "kept"; if it comes back it is reviewed again
@@ -1542,7 +1578,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     }
     func finishRestore(_ result:RestoreResult?) {
         setBusy(false);guard let result=result else{return}
-        if !result.restored.isEmpty { markMapStale();if freeUpMode { freeUpPanel.reload(keepMeasurements:true);result.restored.forEach{ freeUpPanel.restored($0) } } }
+        if !result.restored.isEmpty { spaceChanged();if freeUpMode { freeUpPanel.reload(keepMeasurements:true);result.restored.forEach{ freeUpPanel.restored($0) } } }
         if mapMode || freeUpMode {
             var text="\(result.restored.count) " + L("restored","שוחזרו")
             if activeHistory.blockedCount>0 {text += " · \(activeHistory.blockedCount) " + L("waiting in Trash · Retry restore","ממתינים בפח · נסה לשחזר שוב")}
@@ -1600,6 +1636,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             setBusy(true);precondition(locationButtons.allSatisfy{ !$0.isEnabled });setBusy(false)
             precondition(locationButtons.allSatisfy{ $0.isEnabled })
             precondition(overviewMode && !overviewPanel.isHidden && previewHostView.isHidden && !overviewPanel.volumes.isEmpty && overviewPanel.volumes[0].isStartup && window.subtitle.isEmpty && window.title == "Avakasha","The app opens on the overview with real volume capacities")
+            precondition(overviewPanel.stepIDs.isEmpty && overviewPanel.stepsButton.title == L("Check what can go","בדוק מה אפשר לפנות"),"Before Free up space measures anything, the overview offers to check and measures nothing itself")
             precondition(sidebarOverview.contentTintColor == .controlAccentColor && sidebarMap.contentTintColor != .controlAccentColor && sidebarOverview.accessibilityValue() as? Int == 1 && sidebarMap.accessibilityValue() as? Int == 0,"Overview is highlighted in the sidebar as the selected radio button")
             setOverview(false) // the rest of the smoke drives the file review directly, as choosing a location would
             preferences.set(temp.path,forKey:"lastFolder");refreshEmptyState();precondition(!continueLink.isHidden && continueLink.stringValue.hasSuffix(displayPath(temp)),"Empty state offers to continue with the last folder")
@@ -1896,18 +1933,29 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             try FileManager.default.createDirectory(at:gone,withIntermediateDirectories:true);try Data(repeating:0x67,count:30_000).write(to:gone.appendingPathComponent("library.db"))
             var smallFind=FindingOptions();smallFind.minimumRegenerableBytes=10_000;smallFind.minimumLeftoverBytes=10_000;smallFind.minimumUntouchedBytes=10_000_000_000
             findOverride=(smallFind,[InstalledApp(name:"Helper",bundleID:"com.example.helper")])
+            mapPanel.load(nil);mapRoot=nil;mapMeasuredAt=nil;mapStale=false
             freeUpPanel.findMore();precondition(busy,"Find more starts a search");settle()
+            precondition(!lastFindUsedMap && mapPanel.result?.root.url.path == homeRoot.path && mapMeasuredAt != nil && !mapStale,"The search walked the home folder and filled the empty storage map")
+            overviewPanel.onMapHome?();precondition(mapMode && !busy && mapPanel.result?.root.url.path == homeRoot.path && !mapPanel.rescanButton.isHidden,"Map home folder shows the recent map at once, with Rescan")
+            setFreeUp(true);settle()
             let foundIDs=Set(freeUpPanel.rows.filter{$0.location.id.hasPrefix("find.")}.map{$0.location.id})
             precondition(foundIDs == ["find.Code/web/node_modules","find.Library/Application Support/GoneEditor"],"Found: \(foundIDs) · the catalogue's DerivedData is not listed twice")
             let modulesRow=freeUpPanel.rows.first{$0.location.id == "find.Code/web/node_modules"}!,goneRow=freeUpPanel.rows.first{$0.location.id == "find.Library/Application Support/GoneEditor"}!
             precondition(modulesRow.location.safety == .rebuildable && FreeUpPanel.movable(modulesRow) && goneRow.location.safety == .keepOrReview && !FreeUpPanel.movable(goneRow),"Only regenerable findings can go to Trash")
             precondition(FreeUpPanel.action(for:goneRow.location,home:fakeHome) == .reviewFiles(goneRow.location.url(home:fakeHome)) && LocationTexts.text(for:goneRow.location).title.contains("GoneEditor"))
-            freeUpPanel.findMore();settle();precondition(freeUpPanel.rows.filter{$0.location.id.hasPrefix("find.")}.count == 2,"Searching again adds nothing twice")
+            freeUpPanel.findMore();settle();precondition(lastFindUsedMap && freeUpPanel.rows.filter{$0.location.id.hasPrefix("find.")}.count == 2,"Searching again reuses the recent map and adds nothing twice")
             trashLocation(goneRow.location,measured:goneRow.measurement!,confirmed:true);precondition(FileManager.default.fileExists(atPath:gone.path),"A leftover is never moved by the app")
             trashLocation(modulesRow.location,measured:modulesRow.measurement!,confirmed:true);settle()
             precondition(!FileManager.default.fileExists(atPath:modules.path) && FileManager.default.fileExists(atPath:project.appendingPathComponent("package.json").path),"node_modules moved, the project stays")
+            precondition(mapStale && recentMap(of:fakeHome) == nil,"A folder moved from Free up space marks the map out of date, so it is not reused")
             undoTrash();settle();precondition(FileManager.default.fileExists(atPath:modules.appendingPathComponent("pkg/index.js").path),"Undo brings node_modules back")
             findOverride=nil
+            // The overview's "What can go": what Free up space measured, best steps first, a folder that holds listed rows giving way to them.
+            freeUpPanel.measureAll();settle();setOverview(true)
+            let steps=freeUpPanel.topSteps().map{$0.location.id}
+            precondition(!steps.isEmpty && steps.count <= 5 && overviewPanel.stepIDs == steps && !steps.contains("system.caches") && overviewPanel.stepsButton.title == L("Show all in Free up space","הצג הכול בפינוי מקום"),"Steps: \(steps)")
+            let scores=freeUpPanel.topSteps().map{ Double($0.measurement!.bytes)*FreeUpPanel.weight($0) };precondition(scores == scores.sorted(by:>),"Steps are ranked by size times safety")
+            overviewPanel.onStep?(steps[0]);precondition(freeUpMode && freeUpPanel.selectedRow?.location.id == steps[0],"A step opens Free up space on its row");settle()
             setFreeUp(false);freeUpPanel.setShowSmall(false);home=FileManager.default.homeDirectoryForCurrentUser;freeUpPanel.home=home;try FileManager.default.removeItem(at:fakeHome)
             let savedRoot=root!;activateRoot(temp.appendingPathComponent("other"));precondition(!history.canUndo && !history.canRedo);activateRoot(savedRoot);precondition(history.canRedo)
             toggleTrashConfirmation(confirmationMenuItem!);precondition(!preferences.bool(forKey:"skipTrashConfirmation"))

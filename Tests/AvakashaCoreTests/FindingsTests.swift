@@ -124,4 +124,22 @@ final class FindingsTests: XCTestCase {
         XCTAssertTrue(found.contains(InstalledApp(name: "Vendor Editor", bundleID: "com.vendor.editor")), "The file name counts as a name too")
         XCTAssertEqual(found.filter { $0.bundleID == "com.vendor.editor" }.count, 2)
     }
+    func testMapHints() throws {
+        try make("Code/web/node_modules/x"); try Data("{}".utf8).write(to: home.appendingPathComponent("Code/web/package.json"))
+        try make("Code/loose/node_modules"); try make("Documents/cache"); try make("Library/Application Support/App/Code Cache")
+        try make("Old", modified: old); try make("New")
+        let map = try StorageMapper.map(root: home, token: CancellationToken())
+        func node(_ relative: String) -> StorageNode? {
+            var n: StorageNode? = map.root
+            for c in relative.split(separator: "/") { n = n?.children.first { $0.name == String(c) } }
+            return n
+        }
+        XCTAssertEqual(try XCTUnwrap(node("Code/web/node_modules")).name, "node_modules")
+        XCTAssertEqual(Findings.regenerableHint(for: try XCTUnwrap(node("Code/web/node_modules"))), "node_modules")
+        XCTAssertNil(Findings.regenerableHint(for: try XCTUnwrap(node("Code/loose/node_modules"))))
+        XCTAssertNil(Findings.regenerableHint(for: try XCTUnwrap(node("Documents/cache"))))
+        XCTAssertEqual(Findings.regenerableHint(for: try XCTUnwrap(node("Library/Application Support/App/Code Cache"))), "code cache")
+        XCTAssertGreaterThan(Findings.monthsUnchanged(try XCTUnwrap(node("Old"))) ?? 0, 24)
+        XCTAssertNil(Findings.monthsUnchanged(try XCTUnwrap(node("New"))))
+    }
 }
