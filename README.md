@@ -194,7 +194,7 @@ Drag one or more highlighted rows to a Finder window, a WhatsApp conversation or
 - **Undo is session-scoped.** After quitting, restore items through Finder Trash. Restores never overwrite an existing destination.
 - **A blocked restore does not block the rest.** If a file already occupies the original path, that item stays in Trash and waits under **Retry restore**; earlier batches remain available with Undo. Quitting with items waiting asks first.
 
-The app does not read chat databases or identify clients. It is an independent file tool, not affiliated with WhatsApp or Meta. Read the full [safety limits](docs/SAFETY.md).
+The app reads WhatsApp's local chat list only when you press **Chat names…**, read-only and for chat names only; it never reads messages and does not identify clients. It is an independent file tool, not affiliated with WhatsApp or Meta. Read the full [safety limits](docs/SAFETY.md).
 
 ## Build and test
 
@@ -232,6 +232,10 @@ This is beta 18. Code compilation and automated tests are not substitutes for te
 The interface is English by default. **Avakasha › Language › עברית** switches the whole app to Hebrew with right-to-left layout on the next launch (the choice is stored for this app only). Contributions to accessibility, localisation and synthetic-fixture coverage are welcome. See [CONTRIBUTING](CONTRIBUTING.md), [SECURITY](SECURITY.md), and [CHANGELOG](CHANGELOG.md).
 
 Released under the [MIT License](LICENSE). Built to help people decide what to keep.
+
+## Trademarks
+
+Avakasha is an independent open-source project. It is not affiliated with, endorsed by or sponsored by Apple, Meta (WhatsApp), Google, Adobe, Docker, Anthropic or any other company whose apps it mentions. Their names appear only to identify the folders their apps create on your Mac, and all trademarks belong to their owners.
 
 ## Author and contact
 
