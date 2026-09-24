@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.0-beta.19
+
+- Fix: choosing a location (WhatsApp, Downloads, any folder) after the overview or Free up space showed an empty screen: the scan ran and counted the files, but the file list, its filters and its actions stayed hidden. Leaving either screen now brings them back, and the smoke test checks both paths.
+
 ## 0.1.0-beta.18
 
 - **Wrong verdict? Report it…** under the details of a Free up space row: choose what is wrong (not safe to move, could be marked safe, wrong description, something else), add an optional note, and Avakasha opens a prefilled issue on GitHub in your browser. Nothing is sent until you submit it there. The report holds the catalogue entry's name and fixed path, or for a folder found by searching only the name that matched (for example `~/…/node_modules`), never your own folder names; plus the verdict, your note and the app and macOS versions. Not offered for folders untouched for months, which are your own files, nor in the read-only demo.

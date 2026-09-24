@@ -759,7 +759,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             // Opening the screen is the request: measure what is not measured yet (Esc stops and keeps what was measured).
             if !busy, !freeUpPanel.unmeasured.isEmpty { measureLocations(freeUpPanel.unmeasured) }
         } else {
-            freeUpPanel.isHidden=true;freeUpPanel.detail.isHidden=true;previewHostView.isHidden=false
+            freeUpPanel.isHidden=true;freeUpPanel.detail.isHidden=true;previewHostView.isHidden=false;showReviewViews()
         }
     }
     /// Measures known locations one by one on the work queue; cancel keeps what was measured so far.
@@ -947,7 +947,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
     /// Test hooks: the smoke test answers the report sheet and reads the URL instead of opening a browser.
     var reportOverride:(VerdictReport.Problem,String)?
     var lastReportURL:URL?
-    static let appVersion="0.1.0 beta 18"
+    static let appVersion="0.1.0 beta 19"
     /// The verdict in English, as maintainers read it, whatever the interface language.
     static func englishVerdict(_ safety:CleanupSafety) -> String {
         switch safety {
@@ -1183,7 +1183,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             refreshOverview();overviewPanel.setContinue(demoMode ? nil : preferences.string(forKey:"lastFolder").map{ displayPath(URL(fileURLWithPath:$0)) })
             updateEnabled();updateLocationHighlight();window.makeFirstResponder(overviewPanel.mapHomeButton)
         } else {
-            overviewPanel.isHidden=true;previewHostView.isHidden=false
+            overviewPanel.isHidden=true;previewHostView.isHidden=false;showReviewViews()
         }
     }
     @objc func chooseLocation(_ sender:NSButton) {
@@ -1333,6 +1333,9 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
         }
         refreshEmptyState();updateEnabled();updateLocationHighlight()
     }
+    /// Leaving the overview or Free up space for a location: the file list, its toolbar and its actions come back.
+    /// (A mode that is being entered hides them again right after, so this is safe on every exit path.)
+    func showReviewViews() { reviewOnlyViews.forEach{ $0.isHidden=false };scroll.isHidden=false;refreshEmptyState() }
     func refreshEmptyState() {
         if mapMode {
             emptyList?.isHidden = !mapPanel.isEmpty
@@ -1934,6 +1937,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             precondition(overviewPanel.stepIDs.isEmpty && overviewPanel.stepsButton.title == L("Check what can go","בדוק מה אפשר לפנות"),"Before Free up space measures anything, the overview offers to check and measures nothing itself")
             precondition(sidebarOverview.contentTintColor == .controlAccentColor && sidebarMap.contentTintColor != .controlAccentColor && sidebarOverview.accessibilityValue() as? Int == 1 && sidebarMap.accessibilityValue() as? Int == 0,"Overview is highlighted in the sidebar as the selected radio button")
             setOverview(false) // the rest of the smoke drives the file review directly, as choosing a location would
+            precondition(!scroll.isHidden && reviewOnlyViews.allSatisfy{ !$0.isHidden } && overviewPanel.isHidden,"Leaving the overview brings back the file list and its tools")
             preferences.set(temp.path,forKey:"lastFolder");refreshEmptyState();precondition(!continueLink.isHidden && continueLink.stringValue.hasSuffix(displayPath(temp)),"Empty state offers to continue with the last folder")
             root = temp
             files = try Scanner.scan(root:temp, token:CancellationToken()).files
@@ -2325,6 +2329,7 @@ final class AppController: NSObject, NSApplicationDelegate, NSTableViewDataSourc
             setFloor(0);precondition(!historyEnabled && !FileManager.default.fileExists(atPath:historyFile.path) && guardState() == nil,"Turning the guard off forgets the history")
             spaceHistoryCache=nil;preferences.removeObject(forKey:"lastGuardNotice")
             setFreeUp(false);freeUpPanel.setShowSmall(false);home=FileManager.default.homeDirectoryForCurrentUser;freeUpPanel.home=home;try FileManager.default.removeItem(at:fakeHome)
+            precondition(!scroll.isHidden && reviewOnlyViews.allSatisfy{ !$0.isHidden } && freeUpPanel.isHidden,"Leaving Free up space brings back the file list and its tools")
             let savedRoot=root!;activateRoot(temp.appendingPathComponent("other"));precondition(!history.canUndo && !history.canRedo);activateRoot(savedRoot);precondition(history.canRedo)
             toggleTrashConfirmation(confirmationMenuItem!);precondition(!preferences.bool(forKey:"skipTrashConfirmation"))
             let languageItems=languageMenuItem!.submenu!.items;precondition(languageItems.map{$0.representedObject as? String} == ["en","he"] && languageItems[0].state == .on)
